@@ -117,6 +117,9 @@ without smearing. In the figure each channel is drawn relative to its own Fermi 
 
 ## Notes
 
+- License: the parametrizations come from yaehmop-bandfit (MIT license); the program is
+  under the BSD 2-clause license of YAeHMOP (`license.txt` at the top of the repository).
+
 - The diagonal term of H(k), which couples an orbital with its own images in the other
   cells, uses K = 1.75 by default, as in the original program. The new keyword
   `THE CONST DIAG <K>` changes it. Both fits were made with the default, so these inputs
