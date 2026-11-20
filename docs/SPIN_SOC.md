@@ -9,6 +9,8 @@ bind [options] <inputfile> [paramfile]
   --parm-up FILE --parm-down FILE   spin-polarized run, one parameter table per channel
   --nelec-up X   --nelec-down X     electrons in each channel (default: half of the
                                     electrons of the input in each one)
+  --const-up K   --const-down K     Wolfsberg-Helmholz K of each channel (default:
+                                    THE CONST of the input)
   --soc FILE                        spin-orbit coupling (on-site lambda L.S)
   -h, --help                        list the options
 ```
@@ -40,6 +42,10 @@ half of the electrons of the input (`Electrons` or `Charge` keyword). To fix the
 use `--nelec-up` and `--nelec-down`. Each channel has its own Fermi level
 (`#Fermi_Energy` in its `.out`). A Fermi level shared by both channels is not
 implemented yet.
+
+**K per channel.** Channel fits can come with different Wolfsberg-Helmholz constants.
+`--const-up` / `--const-down` replace `THE CONST` of the input in each channel, and the
+`.out` records the value used (`#THE_CONST`).
 
 **Charges.** Net charges are given per channel: half of the atom's valence electrons
 minus the channel population. Add up and down to get the total. Charge iteration is
@@ -99,6 +105,23 @@ diagrams, MO/wave-function printing, printing of H/S in the `.out`, molecules, T
 and SOC together with spin polarization. SOC needs the build with LAPACK
 (`-DUSE_BLAS_LAPACK=ON`).
 
+## K of the diagonal term: `THE CONST DIAG`
+
+H_ii(k) includes the interaction of an orbital with its own images in the other cells:
+H_ii(R) = K Hii S_ii(R), which gives H_ii(k) = Hii (1 - K + K S_ii(k)). The original
+program uses K = 1.75 hardwired for this term (`K_hamil.c`), whatever `THE CONST` says.
+The off-diagonal elements do use `THE CONST`. In the fork this K is a keyword of the
+input file:
+
+```
+THE CONST 1.72
+THE CONST DIAG 1.72      ; K of the diagonal term (default 1.75, as in the original)
+```
+
+The default stays 1.75, so old inputs and fits (yaehmop-bandfit fitted K with this
+behaviour) give the same bands. In THIN mode the off-diagonal elements now also use
+`THE CONST` (1.75 was hardwired there too).
+
 ## Tests done (2026-11-20)
 
 The tests are automated in `tests/spin_soc/run_tests.py` and need only numpy and scipy:
@@ -125,7 +148,11 @@ fit `aims/MoS2_monolayer_hse06_soc` (EHT parameters, lambdas and structure).
   comes from LAPACK and the 8-digit `.band` format. The VB splitting at K is 0.1650 eV
   and the gap is 2.2681 eV, the same values as the bandfit `fit_summary.json`.
 
-## Example
+## Examples
+
+`new_tests/`: band structures of the MoS2 monolayer with SOC and of bcc Fe with one
+fitted table per spin channel, with inputs, outputs, figures and a README.
+
 
 `examples/spin_soc/`: diamond with a carbon table per channel (`C_up.dat`,
 `C_down.dat`) and `soc.dat`:

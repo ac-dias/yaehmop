@@ -215,6 +215,39 @@ def test_spin_different_tables(bind, tmp):
           np.allclose(2 * q_up, q_ref, atol=2e-6), f"max {np.abs(2*q_up-q_ref).max():.1e}")
 
 
+def test_spin_const(bind, tmp):
+    d = tmp / "sp_const"; d.mkdir()
+    diamond_input(d)
+    ref = d / "ref"; ref.mkdir()
+    txt = (d / "diamond.bind").read_text()
+    (ref / "diamond.bind").write_text(txt.replace("\nprint\n", "\nTHE CONST 1.60\nprint\n", 1))
+    run(bind, ["diamond.bind", TABLE], ref)
+    run(bind, ["--parm-up", TABLE, "--parm-down", TABLE, "--const-up", "1.60",
+               "diamond.bind"], d)
+    check("spin: --const-up 1.60 = spinless run with THE CONST 1.60",
+          filecmp.cmp(d / "diamond_up.bind.band", ref / "diamond.bind.band", shallow=False))
+    check("spin: down channel keeps the K of the input",
+          not filecmp.cmp(d / "diamond_down.bind.band", ref / "diamond.bind.band", shallow=False))
+
+
+def test_const_diag(bind, tmp):
+    d = tmp / "kdiag"; d.mkdir()
+    diamond_input(d)
+    txt = (d / "diamond.bind").read_text()
+    (d / "k.bind").write_text(txt.replace("\nprint\n", "\nTHE CONST 1.60\nTHE CONST DIAG 1.60\nprint\n", 1))
+    (d / "k175.bind").write_text(txt.replace("\nprint\n", "\nTHE CONST DIAG 1.75\nprint\n", 1))
+    run(bind, ["k.bind", TABLE], d)
+    run(bind, ["k175.bind", TABLE], d)
+    run(bind, ["diamond.bind", TABLE], d)
+    H, S = read_dump(d / "k.bind.HAM"), read_dump(d / "k.bind.OV")
+    hii = np.array([-21.4, -11.4, -11.4, -11.4] * 2)      # C s, p (2 atoms)
+    K = 1.60
+    diff = max(np.abs(np.diag(h).real - hii * (1 - K + K * np.diag(s).real)).max() for h, s in zip(H, S))
+    check("THE CONST DIAG 1.60: H_ii(k) = Hii (1 - K + K S_ii(k)) with K = 1.60", diff < 1e-9, f"{diff:.1e}")
+    check("THE CONST DIAG 1.75 = default (original program)",
+          filecmp.cmp(d / "k175.bind.band", d / "diamond.bind.band", shallow=False))
+
+
 def test_soc_lambda0(bind, tmp):
     d = tmp / "soc0"; d.mkdir()
     diamond_input(d)
@@ -305,6 +338,8 @@ def main():
             test_regression(bind, Path(a.ref_bind).resolve(), tmp)
         test_spin_same_tables(bind, tmp)
         test_spin_different_tables(bind, tmp)
+        test_spin_const(bind, tmp)
+        test_const_diag(bind, tmp)
         test_soc_lambda0(bind, tmp)
         test_soc_mos2(bind, tmp)
         test_errors(bind, tmp)

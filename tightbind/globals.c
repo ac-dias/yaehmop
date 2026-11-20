@@ -80,4 +80,5 @@ bool print_progress = false;
 real max_occup = 2.0;
 int spin_channel = 0;
 real spin_nelec = -1.0;
+real spin_const = -1.0;
 char *soc_file_name = 0;

@@ -88,6 +88,8 @@ static void usage(void)
     "                    input extension (one electron per state in each channel)\n"
     "  --nelec-up X --nelec-down X      electrons in each channel (default: half\n"
     "                    of the electrons of the input in each one)\n"
+    "  --const-up K --const-down K      Wolfsberg-Helmholz K of each channel\n"
+    "                    (default: THE CONST of the input)\n"
     "  --soc FILE        spin-orbit coupling, lines 'Element shell lambda(eV)'\n"
     "  -v                print the version\n");
 }
@@ -100,6 +102,7 @@ int main(int argc, char **argv)
   int num_positional = 0;
   char *parm_up = 0, *parm_down = 0;
   real nelec_up = -1.0, nelec_down = -1.0;
+  real const_up = -1.0, const_down = -1.0;
   int i;
 
   if( argc == 2 && strcmp(argv[1], "-v") == 0){
@@ -118,6 +121,10 @@ int main(int argc, char **argv)
       nelec_up = atof(argv[++i]);
     } else if( !strcmp(argv[i],"--nelec-down") && i+1 < argc ){
       nelec_down = atof(argv[++i]);
+    } else if( !strcmp(argv[i],"--const-up") && i+1 < argc ){
+      const_up = atof(argv[++i]);
+    } else if( !strcmp(argv[i],"--const-down") && i+1 < argc ){
+      const_down = atof(argv[++i]);
     } else if( !strcmp(argv[i],"--soc") && i+1 < argc ){
       soc_file_name = argv[++i];
     } else if( !strcmp(argv[i],"-h") || !strcmp(argv[i],"--help") ){
@@ -154,6 +161,10 @@ int main(int argc, char **argv)
   fprintf(stderr,greetings);
 
   if( !parm_up && !parm_down ){
+    if( nelec_up >= 0 || nelec_down >= 0 || const_up > 0 || const_down > 0 ){
+      fprintf(stderr,"--nelec-* and --const-* need --parm-up/--parm-down.\n");
+      exit(-1);
+    }
     run_bind(file_name, use_stdin_stdout, parm_file_name);
     exit(0);
   }
@@ -186,12 +197,13 @@ int main(int argc, char **argv)
   {
     const char *suffix[2] = {"_up","_down"};
     char *parms[2];
-    real nelec[2];
+    real nelec[2], kconst[2];
     char out_name[2][520];
     pid_t pids[2];
     int c, status, failed = 0;
     parms[0] = parm_up;   parms[1] = parm_down;
     nelec[0] = nelec_up;  nelec[1] = nelec_down;
+    kconst[0] = const_up; kconst[1] = const_down;
     for(c=0;c<2;c++){
       channel_name(file_name,suffix[c],out_name[c],520);
     }
@@ -205,6 +217,7 @@ int main(int argc, char **argv)
       if( pids[c] == 0 ){
         spin_channel = c+1;
         spin_nelec = nelec[c];
+        spin_const = kconst[c];
         run_bind_ex(file_name, out_name[c], false, parms[c]);
         exit(0);
       }

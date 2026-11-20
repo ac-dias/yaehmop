@@ -859,6 +859,7 @@ typedef struct {
 
   /* this is K, the constant used for the Hij's */
   real the_const;
+  real the_const_diag; /* K of H_ii(k): orbital with its own images (adias-dev) */
 
   real sparsify_value;
 
@@ -938,6 +939,7 @@ extern bool print_progress; // Shall we print progress during calculations?
 extern real max_occup;      /* electrons per state: 2 spinless, 1 spin channel or SOC */
 extern int spin_channel;    /* 0: spinless, 1: spin up, 2: spin down */
 extern real spin_nelec;     /* electrons in this channel (< 0: half of the total) */
+extern real spin_const;     /* K (THE CONST) of this channel (< 0: the input value) */
 extern char *soc_file_name; /* spin-orbit parameter file (NULL: no SOC) */
 /* fraction of the atomic valence electrons that belongs to this calculation
    (each spin channel holds half of them) */
