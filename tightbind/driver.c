@@ -50,6 +50,7 @@ void set_details_defaults(detail_type *details)
   details->sparsify_value = 0.0;
   details->Execution_Mode = FAT;
   details->the_const = THE_CONST;
+  details->the_const_diag = THE_CONST;
   details->weighted_Hij = 1;
   details->eval_electrostat = 0;
   details->close_nn_contact = NN_DISTANCE;
@@ -320,7 +321,13 @@ void inner_wrapper(char *file_name, bool use_stdin_stdout){
           /*********
           do the average properties calculations
           *********/
-          if( details->avg_props ){
+          if( details->avg_props && soc_active() ){
+            /* SOC: Fermi level and total DOS only, for now */
+            soc_avg_props(unit_cell,details,&(properties.Fermi_E));
+            Hii_converged = 1;
+            zeta_converged = 1;
+          }
+          else if( details->avg_props ){
             sort_avg_prop_info(details,num_orbs,avg_prop_info,orbital_ordering);
 
             find_crystal_occupations(details,unit_cell->num_electrons,num_orbs,
@@ -612,6 +619,20 @@ void inner_wrapper(char *file_name, bool use_stdin_stdout){
 }
 
 void run_bind(char *file_name, bool use_stdin_stdout, char *parm_file_name ){
+  run_bind_ex(file_name, file_name, use_stdin_stdout, parm_file_name);
+}
+
+/****************************************************************************
+ *
+ *                   Procedure run_bind_ex
+ *
+ *   As run_bind, but the outputs (.out, .status, .band, .HAM, ...) are
+ *   named after out_name instead of the input file (adias-dev: used for
+ *   the _up and _down spin channels).
+ *
+ ****************************************************************************/
+void run_bind_ex(char *file_name, char *out_name, bool use_stdin_stdout,
+                 char *parm_file_name ){
   char temp_file_name[500],err_string[500];
   FILE *temp_file;
   FILE *the_file=0;
@@ -648,7 +669,7 @@ void run_bind(char *file_name, bool use_stdin_stdout, char *parm_file_name ){
   }
   else {
     /* open the file that will be used to dump progress reports */
-    strcpy(temp_file_name,file_name);
+    strcpy(temp_file_name,out_name);
     strcat(temp_file_name,".status");
     status_file = fopen(temp_file_name,"w+");
   }
@@ -660,7 +681,7 @@ void run_bind(char *file_name, bool use_stdin_stdout, char *parm_file_name ){
   }
   else {
     /* open the file that will be used for results */
-    strcpy(temp_file_name,file_name);
+    strcpy(temp_file_name,out_name);
     strcat(temp_file_name,".out");
     output_file = fopen(temp_file_name,"w+");
   }
@@ -675,8 +696,32 @@ void run_bind(char *file_name, bool use_stdin_stdout, char *parm_file_name ){
   *********/
   read_inputfile(unit_cell,details,file_name,&num_orbs,&orbital_lookup_table,the_file,parm_file_name);
 
-  /* copy the file name into the details structure */
-  strcpy(details->filename,file_name);
+  /* copy the (output) file name into the details structure */
+  strcpy(details->filename,out_name);
+
+  /* one spin channel: one electron per state, own electron count */
+  if( spin_channel ){
+    real tot_electrons = unit_cell->num_electrons;
+    max_occup = 1.0;
+    if( spin_nelec >= 0.0 ) unit_cell->num_electrons = spin_nelec;
+    else unit_cell->num_electrons = 0.5*tot_electrons;
+    fprintf(output_file,"#SPIN_CHANNEL: %s\n",spin_channel == 1 ? "up" : "down");
+    fprintf(output_file,"; parameter file of this channel: %s\n",
+            parm_file_name ? parm_file_name : "(default)");
+    fprintf(output_file,"; electrons from the input (both channels): %lf\n",tot_electrons);
+    fprintf(output_file,"#ELECTRONS_THIS_CHANNEL: %lf\n",unit_cell->num_electrons);
+    if( spin_const > 0.0 ){
+      fprintf(output_file,"; THE CONST of the input (%lf) replaced by %lf for this channel\n",
+              details->the_const,spin_const);
+      details->the_const = spin_const;
+    }
+    fprintf(output_file,"#THE_CONST: %lf\n",details->the_const);
+    fprintf(output_file,"; one electron per state in this channel; net charges are\n");
+    fprintf(output_file,";   per channel (half of the valence electrons minus the\n");
+    fprintf(output_file,";   channel population): add up and down for the total\n\n");
+    if( details->do_chg_it || details->do_muller_it )
+      fatal("Charge iteration is not implemented for spin-polarized runs.");
+  }
 
 
   /* open the file that will be used for walsh output (if we need one) */
@@ -687,7 +732,7 @@ void run_bind(char *file_name, bool use_stdin_stdout, char *parm_file_name ){
     }
     else {
       /* open the file that will be used for results */
-      strcpy(temp_file_name,file_name);
+      strcpy(temp_file_name,out_name);
       strcat(temp_file_name,".walsh");
       walsh_file = fopen(temp_file_name,"w+");
     }
@@ -735,7 +780,16 @@ void run_bind(char *file_name, bool use_stdin_stdout, char *parm_file_name ){
   *********/
   check_for_errors(unit_cell,details,num_orbs);
 
-  inner_wrapper(file_name,use_stdin_stdout);
+  /* spin-orbit coupling (soc.c): read lambdas, build H_SOC */
+  soc_setup(unit_cell,details,num_orbs,orbital_lookup_table);
+
+  if( details->the_const_diag != THE_CONST ){
+    fprintf(output_file,"; K of the diagonal H_ii(k) term (THE CONST DIAG): %lf\n",
+            details->the_const_diag);
+    fprintf(output_file,"#THE_CONST_DIAG: %lf\n",details->the_const_diag);
+  }
+
+  inner_wrapper(out_name,use_stdin_stdout);
   cleanup_memory();
 
   fprintf(status_file,"Done!\n");

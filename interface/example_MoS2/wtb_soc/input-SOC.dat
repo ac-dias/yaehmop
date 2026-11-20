@@ -1,0 +1,10 @@
+NTHREADS= 1
+SYSDIM= "2D"
+DFT= S
+
+PARAMS_FILE= "huckel-SOC.dat"
+KPATH_FILE= "kpoints.dat"
+OUTPUT= "./out/"
+CALC_DATA= "./out/"
+
+BANDS= T

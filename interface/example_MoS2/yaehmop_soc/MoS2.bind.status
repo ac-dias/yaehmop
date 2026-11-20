@@ -1,0 +1,381 @@
+Read: 5 atoms
+Processing lattice parameters.
+Processing crystal specifications.
+Reading in a new value for the constant K.
+K = 1.722082
+Average Propeties will be calculated.
+Reading 121 K points.
+Completed parameter acquisition.
+There are 17 orbitals in the unit cell.
+61 overlaps will be considered.
+Allocating approximately   987.35 Kbytes (    0.96 Meg).
+Each matrix is:     0.00 meg.
+
+
+Done evaluating overlap integrals.
+Kpoint: 1
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 2
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 3
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 4
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 5
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 6
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 7
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 8
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 9
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 10
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 11
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 12
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 13
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 14
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 15
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 16
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 17
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 18
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 19
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 20
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 21
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 22
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 23
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 24
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 25
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 26
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 27
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 28
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 29
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 30
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 31
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 32
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 33
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 34
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 35
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 36
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 37
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 38
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 39
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 40
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 41
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 42
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 43
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 44
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 45
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 46
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 47
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 48
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 49
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 50
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 51
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 52
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 53
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 54
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 55
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 56
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 57
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 58
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 59
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 60
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 61
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 62
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 63
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 64
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 65
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 66
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 67
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 68
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 69
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 70
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 71
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 72
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 73
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 74
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 75
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 76
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 77
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 78
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 79
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 80
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 81
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 82
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 83
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 84
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 85
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 86
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 87
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 88
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 89
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 90
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 91
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 92
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 93
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 94
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 95
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 96
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 97
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 98
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 99
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 100
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 101
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 102
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 103
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 104
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 105
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 106
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 107
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 108
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 109
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 110
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 111
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 112
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 113
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 114
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 115
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 116
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 117
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 118
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 119
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 120
+Error value from SOC Diagonalization (0 is good): 0
+Kpoint: 121
+Error value from SOC Diagonalization (0 is good): 0
+ Sorting 4114 crystal orbitals.
+Generating band structure.
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Error value from SOC Diagonalization (0 is good): 0
+Done!

@@ -1,0 +1,147 @@
+NTHREADS= 1
+SYSDIM= 2D
+DFT= S
+ 
+ INPUT/OUTPUT FILES
+ 
+OUTPUT= ./out/                                                                
+CALC_DATA= ./out/                                                                
+PARAMS_FILE= huckel-SOC.dat                                                        
+KPATH_FILE= kpoints.dat                                                           
+KPATH_BSE= unknown                                                               
+ORB_W= unknown                                                               
+EM_FILE= unknown                                                               
+ 
+ CONTROL
+ 
+BANDS= T
+DOS= F
+BSE= F
+BSE_BND= F
+IPA= F
+OPT_BZ= F
+SPEC= F
+BERRY_BZ= F
+BERRY= F
+PP_ONLY= F
+BSE_WF= F
+TMCOEF= F
+DTDIAG= F
+CPOL= F
+EM_TENSOR= F
+SPIN_TXT= F
+BOLTZ= F
+GW_MESH= F
+ 
+ K-MESH
+ 
+KMESH_GEN= MKH            
+NGX= 1
+NGY= 1
+NGZ= 1
+SHIFT_1=   0.0000
+SHIFT_2=   0.0000
+SHIFT_3=   0.0000
+ 
+ DOS
+ 
+NEDOS= 6001
+SIGMA=   0.0800
+ 
+ BSE/OPTICAL PROPERTIES
+ 
+BSE_ALGO= cheev       
+NBANDSC= 1
+NBANDSV= 1
+ENSPECI=   0.0000
+ENSPECF=   3.0000
+NESPEC= 6001
+KTOL=   0.0010
+EXC_WF_I= 1
+EXC_WF_F= 2
+COULOMB_POT= V3D  
+CSHIFT=   0.0100
+RNMD= T
+NI=   1.0000
+NS=   1.4700
+ 
+ PARAMETERS FOR COULOMB POTENTIALS
+ 
+EDIEL_Z=   1.0000
+W_COUL=   0.0000
+LC=   1.0000
+R_0=   1.0000
+EDIEL_T=   1.0000
+EDIEL_B=   1.0000
+EDIEL=   1.0000
+ 
+ PARAMETERS FOR BSE with Temperature Effects
+ 
+TA= FA
+ST=   0.0000
+PHAVG=   0.0000
+TEMP=   0.0000
+ 
+ PARAMETERS FOR PCE
+ 
+SES= AM15G 
+CTEMP= 298.1500
+THMAX=      0.5000E-05
+EG=   0.0000
+EGD=   0.0000
+EGS=   0.0000
+EBGS=   0.0000
+ 
+ Effective Mass
+ 
+dK=   0.1400
+ 
+ OTHERS
+ 
+FERMI_SHIFT=   0.0000
+NOCPF= 0
+ 
+ PARAMETERS FOR BOLTZMANN TRANSPORT
+ 
+BTEMP= 300.0000
+NEBOLTZ= 6001
+NEMU= 601
+MU_I=  -2.0000
+MU_F=   2.0000
+KappaL_X=   0.0000
+KappaL_Y=   0.0000
+KappaL_Z=   0.0000
+ELFT_X=      0.1000E+01
+ELFT_Y=      0.1000E+01
+ELFT_Z=      0.1000E+01
+HLFT_X=      0.1000E+01
+HLFT_Y=      0.1000E+01
+HLFT_Z=      0.1000E+01
+SIGMA_BOLTZ=      0.1000E-01
+ 
+ EXTERNAL HAMILTONIANS
+ 
+SPIN_EXC=   0.0000
+MAG_X=   0.0000
+MAG_Y=   0.0000
+MAG_Z=   1.0000
+ 
+ PARAMETERS FOR GW CALCULATION
+G0W0_ALGO=       fast  
+NOMEGA= 300
+OMEGAMAX= 150.0000
+KTOL_GW=     0.1000E-02
+RNM_GW=  0.0400
+SIGMA_GW=  0.0100
+SELF_X_ONLY= F
+ 
+ 
+ 
+ Begin  month          11 day          20           11 hours          53 min
+          57 seg
+ 
+ Band Structure finished
+ 
+ End   month          11 day          20           11 hours          53 min
+          57 seg
+ 

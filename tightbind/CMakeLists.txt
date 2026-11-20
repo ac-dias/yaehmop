@@ -35,6 +35,7 @@ set(YAEHMOP_SRCS
   princ_axes.c
   R_hamil.c
   R_overlap_mat.c
+  soc.c
   recip_space.c
   solid_symmetry.c
   symmetry.c
@@ -177,3 +178,5 @@ set(YAEHMOP_INCLUDE_DIR "include/yaehmop")
 install(TARGETS bind DESTINATION bin)
 install(TARGETS yaehmop_eht DESTINATION lib)
 install(FILES ${YAEHMOP_INSTALL_HDRS} DESTINATION "${YAEHMOP_INCLUDE_DIR}")
+# the BSD license must go with binary redistributions (adias-dev)
+install(FILES ${yaehmop_SOURCE_DIR}/license.txt DESTINATION share/yaehmop)
