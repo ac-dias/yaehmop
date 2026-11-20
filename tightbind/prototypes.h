@@ -352,6 +352,16 @@ extern void automagic_k_points PROTO((detail_type * details, cell_type *cell));
 extern void set_details_defaults PROTO((detail_type *));
 extern void set_cell_defaults PROTO((cell_type *));
 extern void run_bind PROTO((char *, bool, char *));
+extern void run_bind_ex PROTO((char *, char *, bool, char *));
+/* soc.c (adias-dev) */
+extern int soc_active PROTO((void));
+extern int soc_num_states PROTO((void));
+extern void soc_setup PROTO((cell_type *, detail_type *, int, int *));
+extern void soc_kpoint PROTO((cell_type *, detail_type *, int, int,
+                              hermetian_matrix_type, hermetian_matrix_type, int));
+extern real *soc_band_energies PROTO((detail_type *, hermetian_matrix_type,
+                                      hermetian_matrix_type, int));
+extern void soc_avg_props PROTO((cell_type *, detail_type *, real *));
 extern void run_eht PROTO((FILE *));
 
 extern int *my_malloc PROTO((long));

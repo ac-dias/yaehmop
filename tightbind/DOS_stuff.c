@@ -116,7 +116,7 @@ void gen_total_DOS(detail_type *details,cell_type *cell,int num_orbs,avg_prop_in
   }
 
   fprintf(output_file,"\n### TOTAL DENSITY OF STATES \n");
-  fprintf(output_file,"%d states are present.\n",num_orbs*2);
+  fprintf(output_file,"%d states are present.\n",(int)(num_orbs*max_occup+0.5));
   fprintf(output_file,"#BEGIN CURVE\n");
   while(i<tot_num_orbs){
     num_at_this_E = details->K_POINTS[orbital_ordering[i].Kpoint].weight;
@@ -337,7 +337,7 @@ void gen_projected_DOS(detail_type *details,cell_type *cell,int num_orbs,avg_pro
     switch(details->proj_DOS[k].type){
     case P_DOS_ORB:
       fprintf(output_file,"%lf states are present.\n",
-              details->proj_DOS[k].weight_sum * 2.0);
+              details->proj_DOS[k].weight_sum * max_occup);
       fprintf(output_file,"ORBITAL ");
       for(j = 0; j<details->proj_DOS[k].num_contributions; j++){
         fprintf(output_file,"%d %lf,",details->proj_DOS[k].contributions[j]+1,
@@ -352,7 +352,7 @@ void gen_projected_DOS(detail_type *details,cell_type *cell,int num_orbs,avg_pro
                         orbital_lookup_table,&begin,&end);
         num_states += details->proj_DOS[k].weights[j]*(end - begin);
       }
-      fprintf(output_file,"%lf states are present.\n",(real)num_states * 2.0);
+      fprintf(output_file,"%lf states are present.\n",(real)num_states * max_occup);
       fprintf(output_file,"ATOM ");
       for(j = 0; j<details->proj_DOS[k].num_contributions; j++){
         fprintf(output_file,"%d %lf,",details->proj_DOS[k].contributions[j]+1,

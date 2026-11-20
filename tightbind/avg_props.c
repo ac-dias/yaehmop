@@ -250,7 +250,7 @@ void print_avg_occups(detail_type *details,cell_type *cell,int num_orbs,K_orb_pt
         fprintf(output_file,"\n");
 
         /* figure out the net charge */
-        properties.net_chgs[i] = atom->num_valence;
+        properties.net_chgs[i] = VALENCE_FRACTION*atom->num_valence;
         for(j=begin;j<end;j++){
           properties.net_chgs[i] -= AO_occups[j];
           total_electrons += AO_occups[j];
@@ -638,13 +638,13 @@ void find_crystal_occupations(detail_type *details,real electrons_per_cell,int n
   for(i=0;i<tot_orbs && electrons_left > 0.0; i++){
     temp_kpoint = &(details->K_POINTS[orbital_ordering[i].Kpoint]);
 
-    if( electrons_left >= 2.0 ){
-      num_here = 2.0;
+    if( electrons_left >= max_occup ){
+      num_here = max_occup;
 
       orbital_ordering[i].occup = num_here;
       accum += num_here;
 
-      electrons_left -= 2.0;
+      electrons_left -= max_occup;
     }else if(electrons_left > 0.0 ){
       num_here = electrons_left;
       orbital_ordering[i].occup = num_here;
@@ -711,7 +711,7 @@ void find_crystal_occupations(detail_type *details,real electrons_per_cell,int n
   /* now fill it up */
   for(i=0;i<= last_occup;i++){
     temp_kpoint = &(details->K_POINTS[orbital_ordering[i].Kpoint]);
-    temp_kpoint->num_filled_bands += orbital_ordering[i].occup / 2.0;
+    temp_kpoint->num_filled_bands += orbital_ordering[i].occup / max_occup;
   }
 
   /* store the Fermi level */

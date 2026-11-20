@@ -934,4 +934,13 @@ extern real electrostatic_term, eHMO_term, total_energy;
 
 extern bool print_progress; // Shall we print progress during calculations?
 
+/* spin polarization and spin-orbit coupling (adias-dev) */
+extern real max_occup;      /* electrons per state: 2 spinless, 1 spin channel or SOC */
+extern int spin_channel;    /* 0: spinless, 1: spin up, 2: spin down */
+extern real spin_nelec;     /* electrons in this channel (< 0: half of the total) */
+extern char *soc_file_name; /* spin-orbit parameter file (NULL: no SOC) */
+/* fraction of the atomic valence electrons that belongs to this calculation
+   (each spin channel holds half of them) */
+#define VALENCE_FRACTION (spin_channel ? 0.5 : 1.0)
+
 #include "prototypes.h"
