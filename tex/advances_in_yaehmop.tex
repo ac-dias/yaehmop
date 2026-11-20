@@ -68,8 +68,10 @@ byte-identical output to the original program. The aim of these notes is to make
 review of a pull request to \url{https://github.com/greglandrum/yaehmop} easy: each
 change is explained, motivated, shown as code and tied to a test. Section~\ref{sec:inputs}
 summarizes what changed for the user (command line, input keywords, new input and
-output files), and Section~\ref{sec:examples} closes with two worked examples, MoS$_2$ with
-SOC and ferromagnetic bcc Fe, run with the new code.
+output files). Section~\ref{sec:wtb} describes a Python interface that writes the exported
+H and S in the format of WanTiBEXOS, validated on MoS$_2$. Section~\ref{sec:examples}
+closes with two worked examples, MoS$_2$ with SOC and ferromagnetic bcc Fe, run with the
+new code.
 \end{abstract}
 
 \tableofcontents
@@ -132,6 +134,7 @@ tightbind/CMakeLists.txt,\newline tightbind/Makefile,\newline tightbind/makefile
 docs/SPIN\_SOC.md      & new      & user documentation of the new options \\
 tests/spin\_soc/       & new      & automated tests (\file{run\_tests.py}) and their data \\
 examples/spin\_soc/,\newline new\_tests/ & new & small examples; band structures of MoS$_2$ (SOC) and bcc Fe (spin) with outputs and figures \\
+interface/ & new & \file{yaehmop2wtb.py}: H and S of YAeHMOP $\to$ WanTiBEXOS tight-binding files; MoS$_2$ example validated with \texttt{wtb.x} (Section~\ref{sec:wtb}) \\
 README.md, .gitignore  & modified & short section on the fork; ignore Python caches \\
 \bottomrule
 \end{longtable}
@@ -951,6 +954,85 @@ digits of the \texttt{.band} format. The original spinless code shows the same d
 \file{examples/spin\_soc/} has a small diamond example (two carbon tables and a SOC file).
 \file{new\_tests/} has the two worked examples of Section~\ref{sec:examples}.
 
+\subsection{Interface to WanTiBEXOS}\label{sec:wtb}
+
+The H and S that YAeHMOP exports are meant to be reused by other programs, for example to
+compute excitons and optical properties with WanTiBEXOS
+(\url{https://github.com/ac-dias/wantibexos}). The script \file{interface/yaehmop2wtb.py}
+converts the binary dumps of any of the three kinds of run (spinless, SOC, spin
+polarized) into the non-orthogonal tight-binding format that WanTiBEXOS reads with
+\texttt{DFT= S}, the same layout as its \file{siesta2wtb.py}. It is a stand-alone Python
+script (numpy, scipy) that only reads the outputs, and it needs no change in the C code.
+
+\paragraph{From $H(\mathbf{k})$ to $H(\mathbf{R})$.} WanTiBEXOS needs real-space matrices,
+while YAeHMOP dumps $H(\mathbf{k})$ and $S(\mathbf{k})$ at the points of the \texttt{K points}
+block. With a full $\Gamma$-centred mesh of $N=N_1N_2N_3$ points the script computes
+\begin{equation}
+H(\mathbf{R}) = \frac1N\sum_{\mathbf{k}} e^{-2\pi i\,\mathbf{k}\cdot\mathbf{R}}\,H(\mathbf{k}),
+\qquad |R_i|\le r_i ,
+\end{equation}
+and the same for $S$. Here $r_i$ is the number of neighbouring cells summed by YAeHMOP
+(second line of the \texttt{Lattice} section). Because the lattice sums of YAeHMOP stop at
+$r_i$ cells, the transform is exact when $N_i\ge 2r_i+1$. The script checks the mesh
+and refuses smaller ones unless asked to proceed. It also warns when the $k$ points in the
+input are rounded: YAeHMOP uses them exactly as written, and with 8 decimals the rebuilt
+$H(\mathbf{k})$ was only good to $3\times10^{-6}$~eV, against $3\times10^{-13}$~eV with 15
+decimals. It verifies the result by rebuilding $H(\mathbf{k})$ and $S(\mathbf{k})$ on the
+mesh, and checks that $H(\mathbf{R})$ is real (except with SOC) and that $S(\mathbf{R})$ is
+real.
+
+\paragraph{Structure and basis.} The orbitals of each element are read from the
+\texttt{.out} (Extended Hückel Parameters block). The structure, lattice, overlap radius,
+$k$ points and band path are read from the input file, and the lattice vectors are checked
+against the \texttt{.out}. The basis file lists \texttt{index species x y z l m spin}
+in YAeHMOP order. For SOC and SP the orbitals $1..n$ have spin $+1$ and $n+1..2n$ spin
+$-1$, which is the spinor order of \file{soc.c} and of the \texttt{\_up}/\texttt{\_down}
+channels.
+
+\paragraph{Energy zero.} \texttt{wtb.x} diagonalizes $(H(\mathbf{k})-E_F I,\;S(\mathbf{k}))$.
+With $S\neq I$ this is not a rigid shift of the spectrum. The script therefore writes
+$H(\mathbf{R})-E_0 S(\mathbf{R})$ with Fermi level 0, so \texttt{wtb.x} gives exactly the
+YAeHMOP eigenvalues minus $E_0$. By default $E_0$ is the midgap of the mesh eigenvalues
+when there is a gap, and the Fermi level of the \texttt{.out} otherwise. In a
+spin-polarized run each channel uses its own Fermi level, so both have $E_F$ at 0.
+
+\paragraph{Validation with MoS$_2$.} \file{interface/example\_MoS2/} reproduces the whole
+chain with one script (\file{run\_example.sh}): yaehmop-dev with and without SOC (band
+path $\Gamma$--M--K--$\Gamma$ and the $11\times11\times1$ mesh), conversion, \texttt{wtb.x}
+(module \texttt{wtb-teste}, the development branch of WanTiBEXOS), and a point-by-point
+comparison on the same $k$ points (\file{compare\_bands.py}). The converted file is also
+diagonalized in double precision with scipy, which separates the conversion from the
+numerics of \texttt{wtb.x}:
+
+\begin{center}
+\begin{tabular}{l c c}
+\toprule
+bands within VBM$-6$ \ldots VBM$+4$ eV & without SOC & with SOC \\
+\midrule
+converted file (double precision) vs YAeHMOP & $5.4\times10^{-7}$ eV & $5.4\times10^{-7}$ eV \\
+\texttt{wtb.x} vs YAeHMOP & $4.9\times10^{-5}$ eV & $6.6\times10^{-5}$ eV \\
+band gap, YAeHMOP / \texttt{wtb.x} (eV) & 2.312981 / 2.312991 & 2.268108 / 2.268106 \\
+SOC splitting at K, YAeHMOP / \texttt{wtb.x} (eV) & --- & 0.165011 / 0.165014 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The converted file reproduces YAeHMOP to the 8 printed digits of the \texttt{.band} file.
+The $\sim10^{-5}$~eV left for \texttt{wtb.x} comes from its single-precision arithmetic.
+The spin-polarized format was checked in the same way with the bcc Fe fit on an
+$11\times11\times11$ mesh: $5\times10^{-7}$~eV for the converted file and $10^{-3}$~eV for
+\texttt{wtb.x} within $E_F-8\ldots E_F+6$~eV. The larger \texttt{wtb.x} error comes from
+single precision with the nearly singular $S(\mathbf{k})$ of Fe.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{../interface/example_MoS2/bands_yaehmop_vs_wtb.png}
+\caption{MoS$_2$ monolayer without (left) and with (right) SOC: bands of YAeHMOP (lines) and
+of WanTiBEXOS run on the converted $H(\mathbf{R})$, $S(\mathbf{R})$ (circles, every other $k$
+point), relative to the VBM.}
+\label{fig:wtb}
+\end{figure}
+
 %=====================================================================
 \section{Compatibility and suggestions for the pull request}
 %=====================================================================
@@ -992,6 +1074,8 @@ The changes are independent enough to be reviewed in three steps:
   \fn{run\_bind\_ex}, the new parser and \opt{--parm-up/--parm-down/--nelec-*/--const-*}.
 \item \textbf{SOC}: \file{soc.c} and its four call sites, \opt{--soc}, the tests and
   examples.
+\item The interface to WanTiBEXOS (\file{interface/}) is a separate Python tool. It can go
+  with the SOC step or stay in the fork.
 \end{enumerate}
 
 \subsection{Open items}\label{sec:todo}

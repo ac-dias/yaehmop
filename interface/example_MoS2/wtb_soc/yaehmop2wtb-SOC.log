@@ -1,0 +1,8 @@
+YAeHMOP run: yaehmop_soc/MoS2.bind
+type: SOC
+basis: 17 orbitals x 2 spins = 34
+mesh: 11x11x1 (121 k points), overlap radius [5, 5, 0]
+[SOC] energy zero E0 = -7.827960 eV (midgap of the mesh eigenvalues (VBM -9.025113, CBM -6.630808 eV)); file holds H(R) - E0*S(R), Fermi level 0
+[SOC] rebuilt H(k), S(k) on the mesh: max error 2.84e-13 eV, 2.44e-14; max |Im H(R)| 9.88e-02, |Im S(R)| 4.16e-16; 97 R vectors kept
+written: huckel-SOC.dat, basis_set-SOC, input-SOC.dat, kpoints.dat (band path of the input)
+run WanTiBEXOS with:  wtb.x < input-SOC.dat
