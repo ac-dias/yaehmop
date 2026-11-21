@@ -1045,8 +1045,9 @@ one, and the last state of the list got no weight at all:
 +            diff = ... ;
 +          }
 \end{lstlisting}
-With unequal weights the projections did not add up to the total DOS (CoNb4Si: the three
-atom projections summed to 77.63 states against 77.81 in the total DOS); now they do.
+With unequal weights the projections did not add up to the total DOS. CoNb4Si has 98
+orbitals: its total DOS curve adds up to 98.00 states, and the three atom projections,
+which cover all atoms, added up to 97.86; now they add up to 98.00.
 This changes the projected DOS curves of the original program (and only them), which
 is why the regression test compares the \texttt{.out} files without those curves. It
 showed up because with SOC every level is (Kramers) degenerate.
