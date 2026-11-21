@@ -129,3 +129,13 @@ bands of the file agree with YAeHMOP to 5×10⁻⁷ eV and the `wtb.x` bands to 
 E_F−8 … E_F+6 eV. The larger `wtb.x` error than in MoS2 comes from single precision with the
 nearly singular S(k) of Fe. Far above E_F (4p states at ~5700 eV) single precision fails
 completely, which does not affect the bands near E_F.
+
+## Runs with the newer options of yaehmop-dev
+
+- `bind --soc soc.dat --parm-up up.dat --parm-down down.dat RUN.bind` (SOC on top of two
+  spin channels) writes one 2n x 2n spinor dump and is converted as a SOC run
+  (`huckel-SOC.dat`).
+- `bind --common-fermi --parm-up ... --parm-down ... RUN.bind`: the script reads the common
+  Fermi level from `RUN.bind.spin` and uses it as the energy zero of both channels, so the
+  spin-up and spin-down bands keep their relative position. Without `--common-fermi`
+  (fixed moment) each channel keeps its own Fermi level as zero, as before.

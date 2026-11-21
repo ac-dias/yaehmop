@@ -36,6 +36,7 @@ set(YAEHMOP_SRCS
   R_hamil.c
   R_overlap_mat.c
   soc.c
+  spin.c
   recip_space.c
   solid_symmetry.c
   symmetry.c

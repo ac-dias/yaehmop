@@ -90,7 +90,12 @@ static void usage(void)
     "                    of the electrons of the input in each one)\n"
     "  --const-up K --const-down K      Wolfsberg-Helmholz K of each channel\n"
     "                    (default: THE CONST of the input)\n"
-    "  --soc FILE        spin-orbit coupling, lines 'Element shell lambda(eV)'\n"
+    "  --common-fermi    spin-polarized run with one Fermi level for both\n"
+    "                    channels (N_up and N_down come out of it); summary\n"
+    "                    of both channels in <inputfile>.spin\n"
+    "  --soc FILE        spin-orbit coupling, lines 'Element shell lambda(eV)';\n"
+    "                    with --parm-up/--parm-down: SOC on top of the two spin\n"
+    "                    channels, H = diag(H_up, H_down) + H_SOC (same zetas)\n"
     "  -v                print the version\n");
 }
 
@@ -125,6 +130,8 @@ int main(int argc, char **argv)
       const_up = atof(argv[++i]);
     } else if( !strcmp(argv[i],"--const-down") && i+1 < argc ){
       const_down = atof(argv[++i]);
+    } else if( !strcmp(argv[i],"--common-fermi") ){
+      spin_common_fermi = 1;
     } else if( !strcmp(argv[i],"--soc") && i+1 < argc ){
       soc_file_name = argv[++i];
     } else if( !strcmp(argv[i],"-h") || !strcmp(argv[i],"--help") ){
@@ -161,8 +168,9 @@ int main(int argc, char **argv)
   fprintf(stderr,greetings);
 
   if( !parm_up && !parm_down ){
-    if( nelec_up >= 0 || nelec_down >= 0 || const_up > 0 || const_down > 0 ){
-      fprintf(stderr,"--nelec-* and --const-* need --parm-up/--parm-down.\n");
+    if( nelec_up >= 0 || nelec_down >= 0 || const_up > 0 || const_down > 0 ||
+        spin_common_fermi ){
+      fprintf(stderr,"--nelec-*, --const-* and --common-fermi need --parm-up/--parm-down.\n");
       exit(-1);
     }
     run_bind(file_name, use_stdin_stdout, parm_file_name);
@@ -186,9 +194,26 @@ int main(int argc, char **argv)
     fprintf(stderr,"Give the tables with --parm-up/--parm-down, not as a second argument.\n");
     exit(-1);
   }
-  if( soc_file_name ){
-    fprintf(stderr,"SOC together with spin polarization is not implemented yet.\n");
+  if( spin_common_fermi && (nelec_up >= 0 || nelec_down >= 0) ){
+    fprintf(stderr,"--common-fermi and --nelec-up/--nelec-down exclude each other.\n");
     exit(-1);
+  }
+  if( soc_file_name ){
+    /********
+      SOC on top of the two spin channels: one calculation in one process
+      with the spinor hamiltonian diag(H_up, H_down) + H_SOC (soc.c).  The
+      up table is the main parameter table; soc.c reads the down one.
+    ********/
+    if( nelec_up >= 0 || nelec_down >= 0 || spin_common_fermi ){
+      fprintf(stderr,"With --soc the spin channels are coupled: one Fermi level and\n"
+              "the electrons of the input; --nelec-* and --common-fermi don't apply.\n");
+      exit(-1);
+    }
+    soc_parm_down = parm_down;
+    soc_const_up = const_up;
+    soc_const_down = const_down;
+    run_bind(file_name, use_stdin_stdout, parm_up);
+    exit(0);
   }
 #ifdef _MSC_VER
   fprintf(stderr,"Spin-polarized runs are not available on Windows.\n");
@@ -198,15 +223,22 @@ int main(int argc, char **argv)
     const char *suffix[2] = {"_up","_down"};
     char *parms[2];
     real nelec[2], kconst[2];
-    char out_name[2][520];
+    char out_name[2][520], summary_name[520];
     pid_t pids[2];
     int c, status, failed = 0;
+    int to_parent[2][2], to_child[2][2], fd_in[2], fd_out[2];
     parms[0] = parm_up;   parms[1] = parm_down;
     nelec[0] = nelec_up;  nelec[1] = nelec_down;
     kconst[0] = const_up; kconst[1] = const_down;
     for(c=0;c<2;c++){
       channel_name(file_name,suffix[c],out_name[c],520);
+      if( pipe(to_parent[c]) || pipe(to_child[c]) ){
+        perror("pipe");
+        exit(-1);
+      }
     }
+    snprintf(summary_name,520,"%s.spin",file_name);
+    signal(SIGPIPE,SIG_IGN);
     fflush(stdout); fflush(stderr);
     for(c=0;c<2;c++){
       pids[c] = fork();
@@ -215,13 +247,31 @@ int main(int argc, char **argv)
         exit(-1);
       }
       if( pids[c] == 0 ){
+        int o;
+        /* keep only this channel's ends of the pipes */
+        for(o=0;o<2;o++){
+          close(to_parent[o][0]);
+          close(to_child[o][1]);
+          if( o != c ){ close(to_parent[o][1]); close(to_child[o][0]); }
+        }
+        spin_pipe_out = to_parent[c][1];
+        spin_pipe_in = to_child[c][0];
         spin_channel = c+1;
         spin_nelec = nelec[c];
         spin_const = kconst[c];
         run_bind_ex(file_name, out_name[c], false, parms[c]);
+        close(spin_pipe_out);
         exit(0);
       }
     }
+    for(c=0;c<2;c++){
+      close(to_parent[c][1]);
+      close(to_child[c][0]);
+      fd_in[c] = to_parent[c][0];
+      fd_out[c] = to_child[c][1];
+    }
+    if( spin_parent_loop(fd_in,fd_out,pids,summary_name,out_name,
+                         spin_common_fermi,kconst) ) failed = 1;
     for(c=0;c<2;c++){
       if( waitpid(pids[c],&status,0) < 0 || !WIFEXITED(status) ||
           WEXITSTATUS(status) != 0 ){
@@ -231,8 +281,8 @@ int main(int argc, char **argv)
       }
     }
     if( failed ) exit(-1);
-    fprintf(stderr,"Spin-polarized run done: %s.* and %s.*\n",
-            out_name[0],out_name[1]);
+    fprintf(stderr,"Spin-polarized run done: %s.* and %s.*, summary in %s\n",
+            out_name[0],out_name[1],summary_name);
   }
 #endif
   exit(0);

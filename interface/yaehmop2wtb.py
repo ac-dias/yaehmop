@@ -32,8 +32,11 @@ Energy zero: wtb.x diagonalizes (H(k) - E_F*I, S(k)), which is not a rigid shift
 when S != I. The file therefore holds H(R) - E0*S(R) with Fermi level 0, so wtb.x
 gives exactly the YAeHMOP eigenvalues minus E0. --zero auto uses the midgap of
 the mesh eigenvalues for a gapped system and the Fermi level of the .out
-otherwise (spin polarized: the Fermi level of each channel, so that both channels
-have E_F at 0, as when the channels were fitted to a DFT run).
+otherwise. Spin polarized: with a common Fermi level (bind --common-fermi, read
+from RUN.bind.spin) both channels get that one zero; in a fixed-moment run each
+channel gets its own Fermi level, so that both channels have E_F at 0, as when
+the channels were fitted to a DFT run with that moment. SOC with two spin
+tables (one 2n x 2n run) is converted like any SOC run.
 
 Needs numpy (and scipy for the eigenvalues).
 """
@@ -182,7 +185,9 @@ def read_out(path):
         return cast(v[-1]) if v else None
     return dict(shells=shells, fermi=key("Fermi_Energy"), soc_states=key("SOC_STATES", int),
                 channel=(re.findall(r"#SPIN_CHANNEL:\s*(\S+)", text) or [None])[-1],
-                channel_electrons=key("ELECTRONS_THIS_CHANNEL"),
+                # with --common-fermi the channel's electrons come from the shared Fermi level
+                channel_electrons=key("ELECTRONS_THIS_CHANNEL_COMMON_FERMI")
+                or key("ELECTRONS_THIS_CHANNEL"),
                 lattice=[np.array([float(x) for x in l.split()[1:4]])
                          for l in re.findall(r"^\([abc]\)\s+.*$", text, re.M)])
 
@@ -294,6 +299,15 @@ def energy_zero(choice, out, Hk, Sk, nocc, label):
         raise SystemExit(f"{label}: no gap and no #Fermi_Energy in the .out "
                          "(add 'Average Properties' to the input or give --zero <eV>)")
     return out["fermi"], "Fermi level of the .out"
+
+
+def common_fermi(run):
+    """common Fermi level of a spin-polarized run (bind --common-fermi), from <run>.spin"""
+    p = Path(str(run) + ".spin")
+    if not p.exists():
+        return None
+    v = re.findall(r"^#Fermi_Energy:\s*(\S+)", p.read_text(), re.M)
+    return float(v[-1]) if v else None
 
 
 def write_tb(path, kind, cell, n2, blocks):
@@ -418,6 +432,13 @@ def main():
               + ("  (WARNING: smaller than 2r+1, H(R) approximate)" if alias else "")
               + (f"  (WARNING: k points rounded by up to {kdev:.1e})" if kdev > 1e-9 else "")]
     blocks_by_tag = {}
+    # spin polarized with a common Fermi level: one energy zero for both channels,
+    # so that the up and down bands keep their relative position
+    ef_common = common_fermi(run) if kind == "SP" and a.zero in ("auto", "fermi") else None
+    if kind == "SP" and ef_common is None and a.zero in ("auto", "fermi"):
+        print("note: fixed-moment run (no common Fermi level in the .spin file): each spin "
+              "channel gets its own Fermi level as energy zero; with bind --common-fermi "
+              "both channels share one zero", file=sys.stderr)
     for tag, d in data.items():
         lab = f"channel {tag}" if tag else kind
         if kind == "SP":
@@ -426,7 +447,10 @@ def main():
             nocc = nelec
         else:
             nocc = nelec / 2
-        e0, why = energy_zero(a.zero, d["out"], d["Hk"], d["Sk"], nocc, lab)
+        if ef_common is not None:
+            e0, why = ef_common, f"common Fermi level of {run}.spin (--common-fermi)"
+        else:
+            e0, why = energy_zero(a.zero, d["out"], d["Hk"], d["Sk"], nocc, lab)
         cells = real_space(d["Hk"], d["Sk"], kpts, dim, ov)
         eH, eS = rebuild_error(cells, d["Hk"], d["Sk"], kpts)
         imH = max(np.abs(h.imag).max() for _, h, _ in cells)

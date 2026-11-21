@@ -23,13 +23,21 @@ New features:
   independent calculations, and every output gets `_up` / `_down` before the input
   extension. Optional: `--nelec-up/--nelec-down` (electrons per channel) and
   `--const-up/--const-down` (Wolfsberg-Helmholz K per channel).
+  `--common-fermi` gives one Fermi level for both channels. Every spin-polarized run
+  writes a summary `<input>.spin` (Fermi level, N_up, N_down, moments per atom).
 - **Spin-orbit coupling** (on-site lambda L.S): `bind --soc soc.dat input params.dat`.
-  Gives 2n spinor bands, the Fermi level and total DOS, spinor H(k)/S(k) in the `.HAM`/`.OV`
-  dumps, and a `.SOC` file with H_SOC.
+  Gives 2n spinor bands, spinor H(k)/S(k) in the `.HAM`/`.OV` dumps, a `.SOC` file with
+  H_SOC, and all the usual properties with SOC (projected DOS, COOP/COHP, charges,
+  populations, charge iteration, Walsh, molecules) plus spin moments.
+- **SOC on top of two spin channels**: `bind --soc soc.dat --parm-up up.dat --parm-down
+  down.dat input`, H = diag(H_up, H_down) + H_SOC.
+- **viewkel**: a file named `*_up.*` is shown together with its `*_down.*` partner
+  (bands, DOS, COOP).
 - **`THE CONST DIAG <K>`**: new input keyword for the K of the diagonal H_ii(k) term (an
   orbital with its own images). The original code had 1.75 hardwired here, and the default
   is still 1.75.
-- Fix: the `.HAM` dump is truncated when it is opened (it used to be appended to).
+- Fixes: the `.HAM` dump is truncated when it is opened (it used to be appended to); the
+  projected DOS uses the right k-point weights (the original curves change slightly).
 
 Build with LAPACK (`cmake ../tightbind -DUSE_BLAS_LAPACK=ON`); SOC needs it.
 

@@ -485,9 +485,16 @@ void calc_avg_OP(detail_type *details,cell_type *cell,int num_orbs,K_orb_ptr_typ
     kpoint = orbital_ordering[i].Kpoint;
     MO = orbital_ordering[i].MO;
 
+    /* SOC (adias-dev): add the spin-up and spin-down parts of the state */
+    for(l=0;l<num_spin_comp;l++){
     /* get pointers to the orbital information */
-    MO_ptr = &(avg_prop_info[kpoint].orbs[MO*num_orbs]);
-    MO_ptrI = &(avg_prop_info[kpoint].orbsI[MO*num_orbs]);
+    if( l == 0 ){
+      MO_ptr = &(avg_prop_info[kpoint].orbs[MO*num_orbs]);
+      MO_ptrI = &(avg_prop_info[kpoint].orbsI[MO*num_orbs]);
+    } else {
+      MO_ptr = &(avg_prop_info[kpoint].orbs_dn[MO*num_orbs]);
+      MO_ptrI = &(avg_prop_info[kpoint].orbsI_dn[MO*num_orbs]);
+    }
 
     for(j=0;j<num_orbs;j++){
       for( k=j;k<num_orbs;k++){
@@ -511,6 +518,7 @@ void calc_avg_OP(detail_type *details,cell_type *cell,int num_orbs,K_orb_ptr_typ
         }
       }
     }
+    } /* spin components */
     i++;
   }
 
@@ -624,7 +632,7 @@ void find_crystal_occupations(detail_type *details,real electrons_per_cell,int n
   real accum;
   k_point_type *temp_kpoint;
 
-  tot_orbs = num_orbs * details->num_KPOINTS;
+  tot_orbs = num_orbs * num_spin_comp * details->num_KPOINTS;
   electrons_left = electrons_per_cell * (real)details->num_KPOINTS;
 
   /* zero out the orbital ordering array */
@@ -838,7 +846,7 @@ void sort_avg_prop_info(detail_type *details,int num_orbs,avg_prop_info_type *av
   int itab;
   int num_so_far,num_elements;
 
-  num_elements = details->num_KPOINTS * num_orbs;
+  num_elements = details->num_KPOINTS * num_orbs * num_spin_comp;
 
   fprintf(status_file," Sorting %d crystal orbitals.\n",num_elements);
 
@@ -853,8 +861,8 @@ void sort_avg_prop_info(detail_type *details,int num_orbs,avg_prop_info_type *av
   for(i=0;i<details->num_KPOINTS;i++){
     itab = i;
 
-    /* loop over MO's */
-    for(j=0;j<num_orbs;j++){
+    /* loop over MO's (2n spinor states with SOC) */
+    for(j=0;j<num_orbs*num_spin_comp;j++){
       orbital_ordering[num_so_far].Kpoint = i;
       orbital_ordering[num_so_far].MO = j;
       if( details->Execution_Mode != THIN ){

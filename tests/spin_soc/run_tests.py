@@ -9,9 +9,15 @@ test: without the new options the outputs must be byte-identical.
 
 The SOC reference is an independent numpy version of the on-site lambda L.S
 model (the same one as parameter_fitter/soc.py in yaehmop-bandfit), applied to
-the spinless H(k), S(k) dumps of the program.
+the spinless H(k), S(k) dumps of the program.  The same model gives the
+reference Mulliken charges of a SOC run (spinor eigenvectors, common filling).
+
+The projected DOS of the original program weighted the states of a group of
+degenerate levels with the k point weight of the next state (fixed in the
+fork); the regression test therefore skips the projected DOS curves, and a
+separate test checks that the projections add up to the total DOS.
 """
-import argparse, filecmp, shutil, subprocess, sys, tempfile
+import argparse, filecmp, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 import numpy as np
 import scipy.linalg as sl
@@ -93,6 +99,72 @@ def net_charges(path):
     return np.array(out)
 
 
+def curves(path):
+    """all '#BEGIN CURVE' ... '#END CURVE' blocks of an .out: list of (weight, E) arrays"""
+    out, cur = [], None
+    for l in Path(path).read_text().splitlines():
+        if l.startswith("#BEGIN CURVE"):
+            cur = []
+        elif l.startswith("#END CURVE"):
+            out.append(np.array(cur).reshape(-1, 2)); cur = None
+        elif cur is not None and l.strip() and not l.startswith(";"):
+            cur.append([float(x) for x in l.split()[:2]])
+    return out
+
+
+def binned(c, de=0.05, emin=-60.0, emax=40.0):
+    h, _ = np.histogram(c[:, 1], bins=np.arange(emin, emax, de), weights=c[:, 0])
+    return h
+
+
+def without_pdos(path):
+    """the .out with the projected DOS curves left out"""
+    keep, skip = [], False
+    for l in Path(path).read_text().splitlines():
+        if l.startswith("### PROJECTED DENSITY OF STATES"):
+            skip = True
+        if not skip:
+            keep.append(l)
+        if skip and l.startswith("#END CURVE"):
+            skip = False
+    return keep
+
+
+def avg_coops(path):
+    lines = Path(path).read_text().splitlines()
+    i = max(k for k, l in enumerate(lines) if l.startswith("; Average Values of COOP"))
+    out = []
+    for l in lines[i + 1:]:
+        if not l.startswith("("):
+            break
+        out.append(float(l.split(":")[-1]))
+    return np.array(out)
+
+
+def molecular_charges(path):
+    lines = Path(path).read_text().splitlines()
+    i = max(k for k, l in enumerate(lines) if "Net Atomic Charges" in l)
+    out = []
+    for l in lines[i + 1:]:
+        p = l.split()
+        if len(p) != 3 or not p[0].isdigit():
+            break
+        out.append(float(p[2]))
+    return np.array(out)
+
+
+def spin_summary(path):
+    out = {}
+    for l in Path(path).read_text().splitlines():
+        if l.startswith("#") and ":" in l:
+            k, v = l[1:].split(":", 1)
+            try:
+                out[k.strip()] = float(v.split()[0])
+            except (ValueError, IndexError):
+                out[k.strip()] = v.strip()
+    return out
+
+
 # ---------------- independent SOC model (numpy) ----------------
 REAL = {"px": (1, "c"), "py": (1, "s"), "pz": (0, "0"),
         "dx2-y2": (2, "c"), "dz2": (0, "0"), "dxy": (2, "s"), "dxz": (1, "c"), "dyz": (1, "s"),
@@ -165,7 +237,12 @@ def test_regression(bind, ref_bind, tmp):
             out[tag] = d
         for ext in (".out", ".band"):
             a, b = out["ref"] / (name + ext), out["new"] / (name + ext)
-            if a.exists():
+            if not a.exists():
+                continue
+            if ext == ".out" and "PROJECTED DENSITY" in a.read_text():
+                check(f"regression {name}{ext} identical to the original program "
+                      "(projected DOS curves left out)", without_pdos(a) == without_pdos(b))
+            else:
                 check(f"regression {name}{ext} identical to the original program",
                       filecmp.cmp(a, b, shallow=False))
 
@@ -312,6 +389,235 @@ def test_soc_mos2(bind, tmp):
     check("SOC MoS2: .SOC file written", (d / "kl.bind.SOC").exists())
 
 
+def conb4si_input(d, extra=""):
+    src = (EXAMPLES / "CoNb4Si").read_text()
+    src = src.replace("\nprint\n", "\nprint\nnet charges\n" + extra)
+    (d / "CoNb4Si.bind").write_text(src)
+
+
+def test_pdos_sum_rule(bind, tmp):
+    d = tmp / "pdos"; d.mkdir()
+    shutil.copy(EXAMPLES / "CoNb4Si", d / "CoNb4Si")
+    run(bind, ["CoNb4Si", TABLE], d)
+    c = curves(d / "CoNb4Si.out")
+    tot, proj = binned(c[0]), sum(binned(x) for x in c[1:4])   # 3 projections cover all atoms
+    diff = np.abs(tot - proj).max()
+    check("projected DOS: the atom projections add up to the total DOS", diff < 1e-4, f"{diff:.1e}")
+
+
+def test_soc_props_lambda0(bind, tmp):
+    """SOC with lambda = 0: properties equal the spinless ones (each level twice)"""
+    d = tmp / "socprop0"; d.mkdir()
+    conb4si_input(d)
+    (d / "soc0.dat").write_text("Co d 0.0\nNb d 0.0\nSi p 0.0\n")
+    ref = d / "ref"; ref.mkdir()
+    shutil.copy(d / "CoNb4Si.bind", ref)
+    run(bind, ["CoNb4Si.bind", TABLE], ref)
+    run(bind, ["--soc", "soc0.dat", "CoNb4Si.bind", TABLE], d)
+    a, b = ref / "CoNb4Si.bind.out", d / "CoNb4Si.bind.out"
+    check("SOC lambda=0: Fermi level = spinless", fermi(a) == fermi(b))
+    check("SOC lambda=0: average energy = spinless",
+          grep(a, "#Average Energy") == grep(b, "#Average Energy"))
+    dq = np.abs(net_charges(a) - net_charges(b)).max()
+    check("SOC lambda=0: net charges = spinless", dq < 2e-6, f"{dq:.1e}")
+    dc = np.abs(avg_coops(a) - avg_coops(b)).max()
+    check("SOC lambda=0: average COOPs = spinless", dc < 2e-6, f"{dc:.1e}")
+    ca, cb = curves(a), curves(b)
+    dd = np.abs(2 * binned(ca[0]) - binned(cb[0])).max()
+    check("SOC lambda=0: total DOS = 2 x spinless (twice the states)", dd < 1e-9, f"{dd:.1e}")
+    dp = max(np.abs(2 * binned(x) - binned(y)).max() for x, y in zip(ca[1:4], cb[1:4]))
+    check("SOC lambda=0: projected DOS = 2 x spinless", dp < 1e-4, f"{dp:.1e}")
+    dco = max(np.abs(binned(x) - binned(y)).max() for x, y in zip(ca[4:], cb[4:]))
+    check("SOC lambda=0: COOP curves = spinless", dco < 1e-5, f"{dco:.1e}")
+    check("SOC: spin moments printed (zero without magnetism)",
+          abs(float(grep(b, "#TOTAL_SPIN_MOMENT")[0].split()[-1])) < 1e-6)
+
+
+def test_soc_charges_mos2(bind, tmp):
+    """SOC Mulliken charges of MoS2 against the numpy spinor model"""
+    d = tmp / "mos2q"; d.mkdir()
+    params, socf = DATA / "MoS2_params.dat", DATA / "MoS2_soc.dat"
+    head = (DATA / "MoS2_path.bind").read_text().split("\nBand\n")[0]
+    g = np.linspace(0, 1, 6, endpoint=False)
+    kl = [(x, y, 0.0) for x in g for y in g]
+    klist = "\n".join(f"{k[0]:.6f} {k[1]:.6f} {k[2]:.6f} 1.0" for k in kl)
+    (d / "q.bind").write_text(head + "\n\nprint\nnet charges\nend_print\nAverage Properties\n"
+                              "Electrons\n18\n"
+                              f"Dump Hamil\nDump Overlap\n\nK points\n{len(kl)}\n{klist}\n")
+    run(bind, ["q.bind", params], d)
+    H, S = read_dump(d / "q.bind.HAM"), read_dump(d / "q.bind.OV")
+    run(bind, ["--soc", socf, "q.bind", params], d)
+    q_c = net_charges(d / "q.bind.out")
+    lam = {}
+    for l in socf.read_text().splitlines():
+        if l.strip() and not l.startswith("#"):
+            el, sh, v = l.split(); lam[(el.upper(), sh)] = float(v)
+    shells = shells_from_table(params)
+    Hsoc = soc_reference(["MO", "S", "S"], shells, lam)
+    n = H.shape[1]
+    owner = np.concatenate([[a] * sum(len(SHELL[sh]) for sh in shells[el])
+                            for a, el in enumerate(["MO", "S", "S"])])
+    I2 = np.eye(2)
+    E, W = [], []
+    for h, s in zip(H, S):
+        Ss = np.kron(I2, s)
+        e, c = sl.eigh(np.kron(I2, h) + Hsoc, Ss)
+        w = np.real(np.conj(c) * (Ss @ c))            # Mulliken weight of each spinor AO
+        E.append(e); W.append(w[:n] + w[n:])           # add both spin parts of orbital mu
+    E, W = np.array(E), np.array(W)
+    nel = 18 * len(kl)
+    order = np.argsort(E, axis=None, kind="stable")[:nel]
+    pop = np.zeros(3)
+    for idx in order:
+        k, j = np.unravel_index(idx, E.shape)
+        for a in range(3):
+            pop[a] += W[k][owner == a, j].sum()
+    q_py = np.array([6, 6, 6]) - pop / len(kl)
+    dq = np.abs(q_py - q_c).max()
+    check("SOC MoS2: net charges = numpy spinor model", dq < 2e-5, f"{dq:.1e}")
+    check("SOC MoS2: net charges add up to zero", abs(q_c.sum()) < 1e-5, f"{q_c.sum():.1e}")
+
+
+def test_soc_molecule(bind, tmp):
+    d = tmp / "socmol"; d.mkdir()
+    src = (EXAMPLES / "XeF4").read_text()
+    src = re.sub(r"\nfmo\n(.*\n){9}", "\n", src)                   # no FMO block
+    src = re.sub(r"mo print\n15\n(\d+\n){15}", "", src)             # no .MO file
+    assert "fmo" not in [l.strip().lower() for l in src.splitlines()]
+    (d / "x.bind").write_text(src)
+    (d / "soc0.dat").write_text("Xe p 0.0\nF p 0.0\n")
+    (d / "soc.dat").write_text("Xe p 0.8\nF p 0.03\n")
+    ref = d / "ref"; ref.mkdir()
+    shutil.copy(d / "x.bind", ref)
+    run(bind, ["x.bind", TABLE], ref)
+    run(bind, ["--soc", "soc0.dat", "x.bind", TABLE], d)
+    a, b = ref / "x.bind.out", d / "x.bind.out"
+    dq = np.abs(molecular_charges(a) - molecular_charges(b)).max()
+    check("SOC molecule lambda=0: net charges = spinless", dq < 2e-6, f"{dq:.1e}")
+    ta = float(grep(a, "Total_Energy")[0].split()[-1]); tb = float(grep(b, "Total_Energy")[0].split()[-1])
+    check("SOC molecule lambda=0: total energy = spinless", abs(ta - tb) < 1e-3, f"{ta} {tb}")
+    run(bind, ["--soc", "soc.dat", "x.bind", TABLE], d)
+    lev = [float(l.split()[1]) for l in Path(b).read_text().splitlines() if ":--->" in l]
+    lev = np.array(lev)
+    check("SOC molecule: 2n levels in Kramers pairs", len(lev) == 40 and
+          np.abs(lev[0::2] - lev[1::2]).max() < 1e-4)
+
+
+def test_soc_thin_walsh(bind, tmp):
+    d = tmp / "socthin"; d.mkdir()
+    diamond_input(d)
+    txt = (d / "diamond.bind").read_text().replace("average properties\n", "")
+    (d / "fat.bind").write_text(txt)
+    (d / "thin.bind").write_text(txt.replace("Dump Hamil\n", "thin\nDump Hamil\n"))
+    run(bind, ["--soc", "soc.dat", "fat.bind", TABLE], d)
+    run(bind, ["--soc", "soc.dat", "thin.bind", TABLE], d)
+    _, ef = read_band(d / "fat.bind.band"); _, et = read_band(d / "thin.bind.band")
+    check("SOC THIN mode: bands = FAT mode", np.abs(ef - et).max() < 1e-9)
+    # Walsh diagram of a molecule with SOC (lambda = 0: same total energy and charge)
+    w = (EXAMPLES / "ethane.b").read_text().rstrip() + (
+        "\n\nprint\norbital energy walsh\norbital 7 1\nenergy walsh\norbital 1 1\n"
+        "net charge walsh\natom 3 1\nend_print\n")
+    (d / "eth").write_text(w)
+    ref = d / "ref"; ref.mkdir(); shutil.copy(d / "eth", ref)
+    (d / "c0.dat").write_text("C p 0.0\n")
+    run(bind, ["eth", TABLE], ref)
+    run(bind, ["--soc", "c0.dat", "eth", TABLE], d)
+    A = np.loadtxt(ref / "eth.walsh"); B = np.loadtxt(d / "eth.walsh")
+    # columns: variable, net charge, total energy, orbital energy
+    check("SOC Walsh lambda=0: net charge and total energy = spinless",
+          A.shape == B.shape and np.abs(A[:, :3] - B[:, :3]).max() < 1e-5)
+
+
+def fe_inputs(d):
+    fe = ROOT / "new_tests" / "Fe_spin"
+    s = (fe / "Fe_bands.bind").read_text().replace("Dump Hamil\n", "").replace("Dump Overlap\n", "")
+    (d / "Fe.bind").write_text(s)
+    shutil.copy(fe / "Fe_up.dat", d / "Fe_up.dat")
+    shutil.copy(fe / "Fe_down.dat", d / "Fe_down.dat")
+    up = [l.split() for l in (fe / "Fe_up.dat").read_text().splitlines() if l.startswith("FE")]
+    dn = [l.split() for l in (fe / "Fe_down.dat").read_text().splitlines() if l.startswith("FE")]
+    rows = ["; Fe spin-down Hii with the spin-up zetas"]
+    for u, w in zip(up, dn):
+        u = list(u); u[6] = w[6]; rows.append("  ".join(u))
+    (d / "Fe_dn_samez.dat").write_text("\n".join(rows + ["END"]) + "\n")
+    return ["--const-up", "1.752806708980162", "--const-down", "1.7490786283756976"]
+
+
+def test_spin_common_fermi(bind, tmp):
+    d = tmp / "cfermi"; d.mkdir()
+    K = fe_inputs(d)
+    run(bind, ["--common-fermi"] + K + ["--parm-up", "Fe_up.dat", "--parm-down", "Fe_down.dat",
+                                         "Fe.bind"], d)
+    S = spin_summary(d / "Fe.bind.spin")
+    nu, nd = S["ELECTRONS_UP"], S["ELECTRONS_DOWN"]
+    check("spin --common-fermi: N_up + N_down = electrons of the input", abs(nu + nd - 8) < 1e-9,
+          f"{nu} + {nd}")
+    check("spin --common-fermi: common E_F = highest channel E_F",
+          S["Fermi_Energy"] == max(S["Fermi_Energy_up"], S["Fermi_Energy_down"]))
+    check("spin --common-fermi: moment = N_up - N_down, Fe ferromagnetic",
+          abs(S["MAGNETIC_MOMENT"] - (nu - nd)) < 1e-9 and S["MAGNETIC_MOMENT"] > 1.0,
+          f"{S['MAGNETIC_MOMENT']:.3f}")
+    fixed = d / "fixed"; fixed.mkdir()
+    for f in ("Fe.bind", "Fe_up.dat", "Fe_down.dat"):
+        shutil.copy(d / f, fixed / f)
+    run(bind, K + ["--nelec-up", repr(nu), "--nelec-down", repr(nd), "--parm-up", "Fe_up.dat",
+                   "--parm-down", "Fe_down.dat", "Fe.bind"], fixed)
+    for ch in ("up", "down"):
+        check(f"spin --common-fermi: {ch} channel = run with --nelec-* fixed to its N",
+              fermi(d / f"Fe_{ch}.bind.out") == fermi(fixed / f"Fe_{ch}.bind.out") and
+              net_charges(d / f"Fe_{ch}.bind.out").tolist() ==
+              net_charges(fixed / f"Fe_{ch}.bind.out").tolist())
+    F = spin_summary(fixed / "Fe.bind.spin")
+    check("spin summary without --common-fermi: COMMON_FERMI no", str(F["COMMON_FERMI"]).startswith("no"))
+
+
+def test_spin_coop_scale(bind, tmp):
+    """each channel holds half of the electrons: COOP curves and values are half"""
+    d = tmp / "spcoop"; d.mkdir()
+    conb4si_input(d)
+    ref = d / "ref"; ref.mkdir(); shutil.copy(d / "CoNb4Si.bind", ref)
+    run(bind, ["CoNb4Si.bind", TABLE], ref)
+    run(bind, ["--parm-up", TABLE, "--parm-down", TABLE, "CoNb4Si.bind"], d)
+    a, b = ref / "CoNb4Si.bind.out", d / "CoNb4Si_up.bind.out"
+    dv = np.abs(2 * avg_coops(b) - avg_coops(a)).max()
+    check("spin, same tables: average COOP of a channel = half of the spinless", dv < 2e-6, f"{dv:.1e}")
+    dc = max(np.abs(2 * binned(x) - binned(y)).max() for x, y in zip(curves(b)[4:], curves(a)[4:]))
+    check("spin, same tables: COOP curve of a channel = half of the spinless", dc < 1e-5, f"{dc:.1e}")
+
+
+def test_soc_spin(bind, tmp):
+    d = tmp / "socspin"; d.mkdir()
+    K = fe_inputs(d)
+    (d / "fe0.dat").write_text("Fe d 0.0\n")
+    (d / "fe.dat").write_text("Fe d 0.06\n")
+    run(bind, ["--common-fermi"] + K + ["--parm-up", "Fe_up.dat", "--parm-down", "Fe_dn_samez.dat",
+                                         "Fe.bind"], d)
+    S = spin_summary(d / "Fe.bind.spin")
+    sd = d / "soc"; sd.mkdir()
+    for f in ("Fe.bind", "Fe_up.dat", "Fe_dn_samez.dat", "fe0.dat", "fe.dat"):
+        shutil.copy(d / f, sd / f)
+    run(bind, ["--soc", "fe0.dat"] + K + ["--parm-up", "Fe_up.dat", "--parm-down",
+                                           "Fe_dn_samez.dat", "Fe.bind"], sd)
+    o = sd / "Fe.bind.out"
+    _, eu = read_band(d / "Fe_up.bind.band"); _, ed = read_band(d / "Fe_down.bind.band")
+    _, es = read_band(sd / "Fe.bind.band")
+    db = np.abs(np.sort(np.hstack([eu, ed]), 1) - es).max()
+    check("SOC + spin, lambda=0: bands = spin up and spin down bands together", db == 0.0, f"{db:.1e}")
+    check("SOC + spin, lambda=0: Fermi level = common Fermi level of the spin run",
+          fermi(o) == S["Fermi_Energy"])
+    m = float(grep(o, "#TOTAL_SPIN_MOMENT")[0].split()[-1])
+    check("SOC + spin, lambda=0: spin moment = N_up - N_down of the spin run",
+          abs(m - S["MAGNETIC_MOMENT"]) < 1e-5, f"{m:.6f} vs {S['MAGNETIC_MOMENT']:.6f}")
+    run(bind, ["--soc", "fe.dat"] + K + ["--parm-up", "Fe_up.dat", "--parm-down",
+                                          "Fe_dn_samez.dat", "Fe.bind"], sd)
+    m1 = float(grep(o, "#TOTAL_SPIN_MOMENT")[0].split()[-1])
+    check("SOC + spin, lambda=0.06: moment changes a little", 0 < abs(m1 - m) < 0.1, f"{m1:.4f}")
+    r = run(bind, ["--soc", "fe.dat", "--parm-up", "Fe_up.dat", "--parm-down", "Fe_down.dat",
+                   "Fe.bind"], sd, expect_ok=False)
+    check("SOC + spin with different zetas refused",
+          any("zetas" in l for l in grep(sd / "Fe.bind.status", "FATAL")))
+
+
 def test_errors(bind, tmp):
     d = tmp / "err"; d.mkdir()
     diamond_input(d)
@@ -319,10 +625,13 @@ def test_errors(bind, tmp):
     r = run(bind, ["--parm-up", "C_up.dat", "diamond.bind"], d, expect_ok=False)
     check("error: --parm-up without --parm-down", r.returncode != 0 and "both" in r.stderr)
     r = run(bind, ["--soc", "soc.dat", "--parm-up", "C_up.dat", "--parm-down", "C_down.dat",
-                   "diamond.bind"], d, expect_ok=False)
-    check("error: SOC + spin polarization refused", r.returncode != 0 and "not implemented" in r.stderr)
+                   "--nelec-up", "4", "diamond.bind"], d, expect_ok=False)
+    check("error: SOC + spin with --nelec-up refused", r.returncode != 0 and "don't apply" in r.stderr)
+    r = run(bind, ["--common-fermi", "diamond.bind"], d, expect_ok=False)
+    check("error: --common-fermi without spin tables", r.returncode != 0)
     run(bind, ["--soc", "soc.dat", "XeF4", TABLE], d, expect_ok=False)
-    check("error: SOC in a molecule refused", any("FATAL" in l for l in grep(d / "XeF4.status", "FATAL")))
+    check("error: SOC with FMO refused (message names FMO)",
+          any("FMO" in l for l in grep(d / "XeF4.status", "FATAL")))
 
 
 def main():
@@ -342,6 +651,14 @@ def main():
         test_const_diag(bind, tmp)
         test_soc_lambda0(bind, tmp)
         test_soc_mos2(bind, tmp)
+        test_pdos_sum_rule(bind, tmp)
+        test_soc_props_lambda0(bind, tmp)
+        test_soc_charges_mos2(bind, tmp)
+        test_soc_molecule(bind, tmp)
+        test_soc_thin_walsh(bind, tmp)
+        test_spin_common_fermi(bind, tmp)
+        test_spin_coop_scale(bind, tmp)
+        test_soc_spin(bind, tmp)
         test_errors(bind, tmp)
     finally:
         if a.keep:

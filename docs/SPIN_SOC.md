@@ -11,7 +11,11 @@ bind [options] <inputfile> [paramfile]
                                     electrons of the input in each one)
   --const-up K   --const-down K     Wolfsberg-Helmholz K of each channel (default:
                                     THE CONST of the input)
-  --soc FILE                        spin-orbit coupling (on-site lambda L.S)
+  --common-fermi                    one Fermi level for both channels (N_up, N_down
+                                    come out of it)
+  --soc FILE                        spin-orbit coupling (on-site lambda L.S); with
+                                    --parm-up/--parm-down: SOC on top of the two
+                                    spin channels
   -h, --help                        list the options
 ```
 
@@ -39,9 +43,31 @@ at the same time.
 
 **Occupations.** Each channel holds one electron per state. By default each channel gets
 half of the electrons of the input (`Electrons` or `Charge` keyword). To fix the moment,
-use `--nelec-up` and `--nelec-down`. Each channel has its own Fermi level
-(`#Fermi_Energy` in its `.out`). A Fermi level shared by both channels is not
-implemented yet.
+use `--nelec-up` and `--nelec-down`; each channel then has its own Fermi level
+(`#Fermi_Energy` in its `.out`).
+
+**Common Fermi level (`--common-fermi`).** The two channel processes send their energies
+to the parent process, which finds the Fermi level shared by both channels and gives each
+channel its number of electrons (`#ELECTRONS_THIS_CHANNEL_COMMON_FERMI` in its `.out`).
+This needs an extended system with `Average Properties`, and excludes `--nelec-*`.
+
+**Summary `<input>.spin`.** Every spin-polarized run writes it (e.g. `Fe.bind.spin`):
+
+```
+#COMMON_FERMI: yes
+#Fermi_Energy:  -14.376729          (only with --common-fermi)
+#Fermi_Energy_up:  -14.376729
+#Fermi_Energy_down:  -14.400753
+#ELECTRONS_UP:  4.982000
+#ELECTRONS_DOWN:  3.018000
+#MAGNETIC_MOMENT:  1.964000   ; N_up - N_down per cell (Bohr magnetons)
+#Average_Energy:  -134.104417   ; up + down (eV)
+; atom      pop_up     pop_down   net_charge   moment
+1 FE     4.982000   3.018000  -0.000000   1.964000
+```
+
+**COOP.** Each state of a channel holds one electron, so the COOP curves of a channel are
+for one electron per state (the original curve assumed two).
 
 **K per channel.** Channel fits can come with different Wolfsberg-Helmholz constants.
 `--const-up` / `--const-down` replace `THE CONST` of the input in each channel, and the
@@ -95,15 +121,49 @@ electron.
   The `read_matrix_dump` reader of yaehmop-bandfit reads these files directly.
 - `.SOC`: text copy of the on-site H_SOC (nonzero elements `i j Re Im`). With it, the
   spinor H(R) can be rebuilt from a spinless run: `I2 (x) H(R) + delta_{R,0} H_SOC`.
-- `.out`: the lambdas used for each atom, `#SOC_STATES: 2n`, the Fermi level and the
-  total DOS (with `Average Properties`), and the energies per k point (with
-  `print energy levels`).
+- `.out`: the lambdas used for each atom, `#SOC_STATES: 2n`, and all the usual property
+  sections: Fermi level, total and projected DOS, COOP/COHP, AO occupations, net charges,
+  average overlap populations (with `Average Properties`); energies and occupations,
+  wave functions (spin-up and spin-down parts), Mulliken populations, net charges, charge
+  matrices, spinor H and S (with the `print` options). Spin moments
+  m_z = N_up - N_down per atom: `# AVERAGE SPIN MOMENTS` and `#TOTAL_SPIN_MOMENT`.
+
+**Properties with SOC.** S_spinor = I2 (x) S does not couple the spins, so the Mulliken
+populations, projected DOS and COOP of a spinor state are exactly the sums of those of its
+spin-up and spin-down parts. Orbital and atom numbers in `Projected DOS` and `COOP` keep
+their spinless meaning (an orbital projection adds both spins). Energy levels, charge
+matrix rows and Walsh orbital numbers refer to the 2n spinor states. COHP uses the
+spinless EHT matrix elements (the on-site SOC term is not in it). This works for crystals,
+molecules (levels in Kramers pairs, populations, charges), charge iteration, Walsh
+diagrams and THIN mode (bands).
 
 **Not implemented with SOC yet.** The program stops with a message naming the option:
-projected DOS, COOP/COHP, FMO/FCO, populations and charges, charge iteration, Walsh
-diagrams, MO/wave-function printing, printing of H/S in the `.out`, molecules, THIN mode,
-and SOC together with spin polarization. SOC needs the build with LAPACK
-(`-DUSE_BLAS_LAPACK=ON`).
+FMO/FCO, `MO print` (.MO files for viewkel), zeta variation, modified Mulliken analysis,
+sparse dumps, the molecular electrostatic energy, netCDF, and the Walsh items that follow
+single MO coefficients. SOC needs the build with LAPACK (`-DUSE_BLAS_LAPACK=ON`).
+
+## SOC on top of the two spin channels
+
+```
+bind --soc soc.dat --parm-up up.dat --parm-down down.dat [--const-up K1 --const-down K2] input.bind
+```
+
+One calculation (one process, outputs without suffix) with
+H = diag(H_up(k), H_down(k)) + H_SOC and S = I2 (x) S(k). The two tables may differ in
+Hii (and K), not in the basis or the zetas (the program stops if they do). The electrons
+are those of the input, with one Fermi level; `--nelec-*` and `--common-fermi` do not
+apply. The spin moments in the `.out` give the magnetization. With lambda = 0 the result
+equals a spin-polarized run with `--common-fermi`.
+
+## viewkel
+
+When viewkel reads a band file or a DOS/COOP file (made by `fit_dos`/`fit_coop`) whose
+name contains `_up.`, it also reads the `_down.` file and shows both channels in one
+graph: spin-down bands dashed, spin-down DOS on the negative side, spin-down COOP dashed.
+The Fermi level comes from `<input>.spin` (the common one when there is one). For the
+DOS/COOP, run `fit_dos`/`fit_coop` on both channels with the same energy window and step.
+In the text interface, `curve n` toggles curve n and its spin-down partner. SOC outputs
+need nothing special (2n bands, usual DOS/COOP sections).
 
 ## K of the diagonal term: `THE CONST DIAG`
 
@@ -122,7 +182,7 @@ The default stays 1.75, so old inputs and fits (yaehmop-bandfit fitted K with th
 behaviour) give the same bands. In THIN mode the off-diagonal elements now also use
 `THE CONST` (1.75 was hardwired there too).
 
-## Tests done (2026-11-20)
+## Tests (2026-11-20, extended 2026-11-21)
 
 The tests are automated in `tests/spin_soc/run_tests.py` and need only numpy and scipy:
 
@@ -135,7 +195,9 @@ model. The MoS2 inputs (`tests/spin_soc/data/`) come from the yaehmop-bandfit va
 fit `aims/MoS2_monolayer_hse06_soc` (EHT parameters, lambdas and structure).
 
 - Without the new options: `.out` and `.band` of the examples diamond, XeF4, Te2Br and
-  CoNb4Si are byte-identical to the original program.
+  CoNb4Si are byte-identical to the original program, except the projected DOS curves:
+  the original weighted the states of a group of degenerate levels with the k-point
+  weight of the next state (fixed; the atom projections now add up to the total DOS).
 - Spin polarization with the same table in both channels: each channel's `.band` and
   `.HAM` equal the spinless run. Energies, occupations and net charges are exactly half.
   With a different Co d level in the down channel (CoNb4Si), only that channel changes.
@@ -162,3 +224,15 @@ bind diamond.bind C_up.dat                              # spinless
 bind --soc soc.dat diamond.bind C_up.dat                # SOC
 bind --parm-up C_up.dat --parm-down C_down.dat diamond.bind   # spin polarized
 ```
+
+Added on 2026-11-21 (69 checks in total):
+
+- SOC with lambda = 0 (CoNb4Si): Fermi level, average energy, net charges, average COOPs
+  and COOP curves equal the spinless run; total and projected DOS are twice the spinless.
+- SOC MoS2: average net charges equal an independent numpy calculation from the spinor
+  eigenvectors (4e-7).
+- SOC molecule (XeF4): lambda = 0 gives the spinless charges and total energy; lambda != 0
+  gives 40 levels in Kramers pairs. SOC THIN bands = FAT bands; SOC Walsh diagram.
+- `--common-fermi` (bcc Fe): N_up + N_down = 8, each channel equals a run with
+  `--nelec-*` fixed to its N; COOP of a channel is half of the spinless one.
+- SOC + spin with lambda = 0: bands, Fermi level and moment equal the common-Fermi spin run.

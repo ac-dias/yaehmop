@@ -61,10 +61,17 @@ This document describes, file by file, every change made to the \texttt{tightbin
 program of YAeHMOP in the fork \url{https://github.com/ac-dias/yaehmop} (branch
 \texttt{adias-dev}) since upstream commit \texttt{4ded45b} (``bump min cmake version
 to 10''). The changes add (i)~spin-polarized calculations with one parameter table per
-spin channel, (ii)~on-site spin--orbit coupling (SOC) in a spinor basis, (iii)~a
-configurable Wolfsberg--Helmholz constant for the diagonal $H_{ii}(\mathbf{k})$ term, which
-was hardwired to $1.75$, and (iv)~two small fixes. Runs without the new options give
-byte-identical output to the original program. The aim of these notes is to make the
+spin channel, with an optional Fermi level shared by the channels and a joint summary
+(populations and magnetic moments), (ii)~on-site spin--orbit coupling (SOC) in a spinor
+basis, for crystals and molecules, with all the usual properties (projected DOS,
+COOP/COHP, Mulliken charges and populations, charge iteration, Walsh diagrams) and spin
+moments, (iii)~SOC on top of the two spin channels, (iv)~a configurable
+Wolfsberg--Helmholz constant for the diagonal $H_{ii}(\mathbf{k})$ term, which was
+hardwired to $1.75$, (v)~fixes, one of which (the $k$-point weights of the projected DOS)
+changes the projected DOS curves of the original program, and (vi)~support for the new
+outputs in the viewer \texttt{viewkel} (both spin channels in one graph). Apart from the
+projected DOS fix, runs without the new options give byte-identical output to the
+original program. The aim of these notes is to make the
 review of a pull request to \url{https://github.com/greglandrum/yaehmop} easy: each
 change is explained, motivated, shown as code and tied to a test. Section~\ref{sec:inputs}
 summarizes what changed for the user (command line, input keywords, new input and
@@ -92,11 +99,30 @@ child processes at the same time. Their outputs carry the suffix \texttt{\_up} o
 channel and its Wolfsberg--Helmholz constant can be set on the command line
 (\opt{--nelec-up}, \opt{--nelec-down}, \opt{--const-up}, \opt{--const-down}).
 
+\item[Fermi level shared by the channels (\opt{--common-fermi})]
+The parent process collects the energies of both channels, finds the common Fermi level,
+and gives each channel its number of electrons. Every spin-polarized run also writes a
+summary \texttt{<input>.spin}: Fermi level(s), $N_\uparrow$, $N_\downarrow$, magnetic
+moment, and populations and moments per atom.
+
 \item[Spin--orbit coupling (\opt{--soc})]
 An on-site $\lambda_{A,l}\,\mathbf{L}\cdot\mathbf{S}$ term is added to the spinless
-$H(\mathbf{k})$ in a basis of $2n$ spinors. The program writes $2n$ bands, the Fermi level
-and total DOS with one electron per state, and the spinor $H(\mathbf{k})$, $S(\mathbf{k})$
-in the usual \texttt{.HAM}/\texttt{.OV} binary format, plus a text file with $\Hsoc$.
+$H(\mathbf{k})$ in a basis of $2n$ spinors. The program writes $2n$ bands, the spinor
+$H(\mathbf{k})$, $S(\mathbf{k})$ in the usual \texttt{.HAM}/\texttt{.OV} binary format and
+a text file with $\Hsoc$. The spinor eigenvectors go through the usual property code, so
+the Fermi level, total and projected DOS, COOP/COHP, Mulliken populations, net charges,
+charge matrices, wave functions, charge iteration and Walsh diagrams work with SOC, for
+crystals, molecules and in THIN mode (bands). Spin moments $m_z$ per atom are printed.
+
+\item[SOC with two spin tables (\opt{--soc} with \opt{--parm-up/--parm-down})]
+One calculation with $H_{\mathrm{sp}}=\mathrm{diag}(H^\uparrow,H^\downarrow)+\Hsoc$; the
+tables may differ in $H_{ii}$ (and $K$), not in the zetas.
+
+\item[viewkel]
+Reading a file whose name has \texttt{\_up.} also reads its \texttt{\_down.} partner and
+draws both channels in one graph (bands: spin down dashed; DOS: spin down on the
+negative side; COOP: spin down dashed), with the Fermi level of the \texttt{.spin}
+summary. Old viewkel defects that blocked its text mode are fixed.
 
 \item[\texttt{THE CONST DIAG}]
 A new input keyword for the $K$ of the term that couples an orbital with its own images in
@@ -106,7 +132,10 @@ the other cells. The original code always used $K=1.75$ for this term
 \item[Fixes]
 \texttt{.HAM} is now truncated when it is opened. Before, running twice in the same
 directory appended to the old file. In THIN mode the off-diagonal $H(\mathbf{k})$
-elements now use \texttt{THE CONST}; $1.75$ was hardwired there too.
+elements now use \texttt{THE CONST}; $1.75$ was hardwired there too. In the projected
+DOS, the states of a group of degenerate levels were weighted with the $k$-point weight
+of the \emph{next} state (and the last one with none); the projections now add up to the
+total DOS. The COOP curves of a spin channel had the factor 2 of doubly occupied states.
 \end{description}
 
 \subsection{Files at a glance}
@@ -116,9 +145,13 @@ elements now use \texttt{THE CONST}; $1.75$ was hardwired there too.
 \textrm{\textbf{file}} & \textbf{status} & \textbf{what changed} \\
 \midrule
 \endhead
-tightbind/soc.c        & new      & the whole SOC implementation (reading $\lambda$, $\mathbf{L}$ matrices, spinor matrices, diagonalization, dumps, Fermi level/DOS) \\
-tightbind/main.c       & modified & new command-line parser; one process per spin channel \\
-tightbind/driver.c     & modified & \fn{run\_bind\_ex} (input name $\neq$ output name); channel set-up; calls to the SOC code \\
+tightbind/soc.c        & new      & the whole SOC implementation (reading $\lambda$, $\mathbf{L}$ matrices, spinor matrices, diagonalization with eigenvectors, dumps, per-$k$ properties, storage for the average properties, spin moments, second spin table) \\
+tightbind/spin.c       & new      & spin-polarized runs: pipes between the channel processes and the parent, common Fermi level, \texttt{.spin} summary \\
+tightbind/main.c       & modified & new command-line parser; one process per spin channel, with pipes; SOC with two tables \\
+tightbind/driver.c     & modified & \fn{run\_bind\_ex} (input name $\neq$ output name); channel set-up; calls to the SOC and spin code \\
+tightbind/memory.c     & modified & average-properties arrays sized for $2n$ spinor states with SOC \\
+tightbind/COOP\_stuff.c & modified & COOP of a spinor state = sum over its spin parts; $2n$ states; curve scaled to the electrons per state \\
+tightbind/walsh.c      & modified & orbital energies and charge-matrix elements of spinor states \\
 tightbind/kpoints.c    & modified & SOC branch in the $k$-point loop; \texttt{O\_TRUNC} for \texttt{.HAM} \\
 tightbind/bands.c      & modified & SOC branch in the band structure ($2n$ bands) \\
 tightbind/K\_hamil.c   & modified & \var{details->the\_const\_diag} instead of the hardwired \var{THE\_CONST} \\
@@ -127,10 +160,12 @@ tightbind/bind.h       & modified & new field \var{the\_const\_diag}; new global
 tightbind/globals.c    & modified & definitions of the new globals \\
 tightbind/prototypes.h & modified & prototypes of \fn{run\_bind\_ex} and of the \file{soc.c} functions \\
 tightbind/mulliken.c   & modified & occupation \var{max\_occup} instead of 2; valence fraction in the net charges \\
-tightbind/avg\_props.c & modified & same, for the crystal occupations and average net charges \\
-tightbind/DOS\_stuff.c & modified & ``states are present'' counts use \var{max\_occup} \\
+tightbind/avg\_props.c & modified & same, for the crystal occupations and average net charges; $2n$ states and spin sum in the average overlap populations \\
+tightbind/DOS\_stuff.c & modified & ``states are present'' counts use \var{max\_occup}; $2n$ states; fix of the $k$ weights of the projected DOS \\
 tightbind/genutil.c    & modified & electron-count sanity check uses \var{max\_occup} \\
-tightbind/CMakeLists.txt,\newline tightbind/Makefile,\newline tightbind/makefile.linux & modified & \file{soc.c} added to the sources \\
+tightbind/CMakeLists.txt,\newline tightbind/Makefile,\newline tightbind/makefile.linux & modified & \file{soc.c}, \file{spin.c} added to the sources \\
+viewkel/band\_graphs.c,\newline viewkel/prop\_graphs.c,\newline viewkel/genutil.c, viewkel/interface.c,\newline viewkel/graph\_objects.h, viewkel/prototypes.h & modified & both spin channels in one band or property graph; Fermi level from the \texttt{.spin} summary (Section~\ref{sec:viewkel}) \\
+viewkel/buttons.c,\newline viewkel/hierarchy.c & modified & old defects: text mode (\texttt{-t}) crashed creating X button windows and at exit; freeing a property graph without integration crashed \\
 docs/SPIN\_SOC.md      & new      & user documentation of the new options \\
 tests/spin\_soc/       & new      & automated tests (\file{run\_tests.py}) and their data \\
 examples/spin\_soc/,\newline new\_tests/ & new & small examples; band structures of MoS$_2$ (SOC) and bcc Fe (spin) with outputs and figures \\
@@ -139,8 +174,9 @@ README.md, .gitignore  & modified & short section on the fork; ignore Python cac
 \bottomrule
 \end{longtable}
 
-In numbers, for the code, tests and examples: about 1\,500 lines added and 50 removed in
-28 files; about 540 of the added lines are \file{soc.c} and 356 are the test script. The core numerical routines (overlaps, $H(R)$,
+In numbers, for the code and tests (\file{tightbind}, \file{viewkel}, \file{tests},
+\file{docs}): about 3\,000 lines added and 80 removed in 34 files; about 960 of the added
+lines are \file{soc.c}, 330 \file{spin.c} and 670 the test script. The core numerical routines (overlaps, $H(R)$,
 Bloch sums, symmetry, properties) are not touched.
 
 \subsection{Commits on the branch}
@@ -150,6 +186,7 @@ Bloch sums, symmetry, properties) are not touched.
 866e130 & spin polarization (one table per channel) and SOC in the tightbinding program; \texttt{.HAM} truncation fix; docs, example and tests \\
 c38236f & configurable $K$ (\texttt{THE CONST DIAG}, \opt{--const-up/--const-down}); \texttt{new\_tests} \\
 722ba73 & remove a \texttt{\_\_pycache\_\_} committed by mistake; \file{.gitignore} \\
+\textrm{(next)} & SOC with all properties, molecules, THIN and Walsh; \opt{--common-fermi} and \texttt{.spin} summary; SOC with two spin tables; projected DOS and COOP fixes; viewkel \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -179,7 +216,12 @@ bind --use_stdin_stdout [paramfile]
                     electrons of the input in each one)
   --const-up K --const-down K      Wolfsberg-Helmholz K of each channel
                     (default: THE CONST of the input)
-  --soc FILE        spin-orbit coupling, lines 'Element shell lambda(eV)'
+  --common-fermi    spin-polarized run with one Fermi level for both
+                    channels (N_up and N_down come out of it); summary
+                    of both channels in <inputfile>.spin
+  --soc FILE        spin-orbit coupling, lines 'Element shell lambda(eV)';
+                    with --parm-up/--parm-down: SOC on top of the two spin
+                    channels, H = diag(H_up, H_down) + H_SOC (same zetas)
   -v                print the version
   -h, --help        print this list
 \end{lstlisting}
@@ -192,8 +234,11 @@ bind --use_stdin_stdout [paramfile]
 --parm-up/--parm-down & both or none; not with \texttt{--use\_stdin\_stdout}; the
   tables replace the second positional argument (giving both is an error) \\
 --nelec-*, --const-* & only with \texttt{--parm-up/--parm-down}; each one is optional \\
---soc & works with the usual \texttt{[paramfile]}; not with spin polarization (yet);
-  needs a LAPACK build \\
+--common-fermi & only with \texttt{--parm-up/--parm-down}, not with \opt{--nelec-*};
+  needs an extended system with \texttt{Average Properties} \\
+--soc & works with the usual \texttt{[paramfile]}; with \opt{--parm-up/--parm-down} it is
+  one coupled calculation (\opt{--const-*} apply, \opt{--nelec-*} and
+  \opt{--common-fermi} do not); needs a LAPACK build \\
 unknown \texttt{--}option & stops with the usage message \\
 \bottomrule
 \end{tabularx}
@@ -225,9 +270,15 @@ Some existing keywords are interpreted differently in the new modes:
   \opt{--const-up/--const-down} when those are given.
 \item \texttt{Dump Hamil} / \texttt{Dump Overlap}: in a spin-polarized run each channel
   writes its own files. With SOC the files hold the $2n\times2n$ spinor matrices.
-\item Keywords for properties that are not implemented with SOC (projected DOS, COOP,
-  FMO, populations, charge iteration, Walsh, MO and matrix printing, \ldots) stop a SOC run
-  with a message naming the keyword. Charge iteration also stops a spin-polarized run.
+\item Keywords for the few properties that are not implemented with SOC (FMO/FCO,
+  \texttt{MO print} for viewkel, zeta variation, modified Mulliken analysis, sparse
+  dumps, the molecular electrostatic energy, netCDF, and the Walsh items that follow one
+  MO coefficient) stop a SOC run with a message naming the keyword. Charge iteration
+  stops a spin-polarized run and a SOC run with two spin tables.
+\item \texttt{Projected DOS}, \texttt{COOP} and the printing options work with SOC.
+  Orbital and atom numbers keep their spinless meaning: a projection on an orbital adds
+  its spin-up and spin-down parts. Energy levels, charge matrices and Walsh orbital
+  numbers refer to the $2n$ spinor states.
 \end{itemize}
 
 \subsection{Parameter tables}
@@ -263,14 +314,23 @@ SOC & \texttt{.band} with $2n$ energies per $k$ point (header ``\texttt{2n orbit
   unit cell.}''); \texttt{.HAM}/\texttt{.OV} with $2n\times2n$ spinor matrices in the
   usual binary format (Eq.~\eqref{eq:packed}; orbitals $1..n$ spin up, $n+1..2n$ spin
   down); new text file \texttt{.SOC} with the nonzero elements \texttt{i j Re Im} of
-  $\Hsoc$ \\
+  $\Hsoc$; in the \texttt{.out} the usual property sections (DOS, projected DOS, COOP,
+  occupations, net charges, \ldots) and the spin moments \\
+spin polarized, summary & \texttt{<input>.spin}: \texttt{\#COMMON\_FERMI},
+  \texttt{\#Fermi\_Energy} (common), \texttt{\#Fermi\_Energy\_up/down},
+  \texttt{\#ELECTRONS\_UP/DOWN}, \texttt{\#MAGNETIC\_MOMENT}, \texttt{\#Average\_Energy}
+  and a table of populations, net charges and moments per atom \\
 \bottomrule
 \end{tabularx}
 \end{center}
 
 New keys in the \texttt{.out}: \texttt{\#SPIN\_CHANNEL}, \texttt{\#ELECTRONS\_THIS\_CHANNEL}
-and \texttt{\#THE\_CONST} in spin-polarized runs; \texttt{\#SOC\_STATES} and the list of
-$\lambda$ used per atom with SOC; \texttt{\#THE\_CONST\_DIAG} when it is not the default.
+and \texttt{\#THE\_CONST} in spin-polarized runs (and
+\texttt{\#ELECTRONS\_THIS\_CHANNEL\_COMMON\_FERMI} with \opt{--common-fermi});
+\texttt{\#SOC\_STATES}, the list of $\lambda$ used per atom, the section
+\texttt{\# AVERAGE SPIN MOMENTS} and \texttt{\#TOTAL\_SPIN\_MOMENT} with SOC;
+\texttt{\#SOC\_SPIN\_TABLES}, \texttt{\#THE\_CONST\_UP/DOWN} with SOC and two tables;
+\texttt{\#THE\_CONST\_DIAG} when it is not the default.
 They start with \texttt{\#} or \texttt{;}, like the existing ones.
 
 %=====================================================================
@@ -485,8 +545,27 @@ A second run in the same process would inherit that state. Separate processes is
 completely and run the channels in parallel for free. The cost is that this path needs
 POSIX \fn{fork}; on Windows (\texttt{\_MSC\_VER}) a spin-polarized run stops with a
 message. Spin polarization is also refused with \texttt{--use\_stdin\_stdout} and when a
-table is given as the second positional argument. SOC together with spin polarization is
-refused for now.
+table is given as the second positional argument. SOC together with spin polarization
+does not use this path: it is one coupled calculation in one process
+(Section~\ref{sec:socspin}).
+
+\paragraph{Pipes to the parent (\file{spin.c}).} Before forking, \fn{main} opens two
+pipes per channel (child $\to$ parent and parent $\to$ child). Each child keeps only its
+own ends (globals \var{spin\_pipe\_out}, \var{spin\_pipe\_in}); the parent serves both
+children in \fn{spin\_parent\_loop} until they finish. The messages are binary and go in
+lock step: the parent reads one message from each child, checks that both have the same
+type, and acts on it:
+\begin{itemize}
+\item \texttt{SPIN\_MSG\_ENERGIES} (only with \opt{--common-fermi}): the sorted energies of
+  all $k$ points of the channel (Section~\ref{sec:spinocc}); the parent answers each child
+  with its electron count and the common Fermi level.
+\item \texttt{SPIN\_MSG\_SUMMARY}: sent by every child at the end of \fn{run\_bind\_ex}
+  (\fn{spin\_send\_summary}): Fermi level, electrons, average energy, symbols, valence
+  electrons and net charges of the atoms. When both have arrived the parent writes
+  \texttt{<input>.spin}.
+\end{itemize}
+If a child dies (or the two get out of step), the parent stops the other one, so a
+failed channel never leaves its partner waiting for an answer.
 
 \paragraph{\file{driver.c}: \fn{run\_bind\_ex}.} In the original \fn{run\_bind} the input
 file name is also the base name of every output (\texttt{.status}, \texttt{.out},
@@ -524,13 +603,51 @@ nonzero, \fn{run\_bind\_ex}:
 
 \subsection{Occupations and Fermi level}\label{sec:spinocc}
 
-Each channel fills its own levels with one electron per state, and so has its own Fermi
-level (\texttt{\#Fermi\_Energy} in its \texttt{.out}). This is a fixed-moment calculation:
-the user sets $N_\uparrow$ and $N_\downarrow$, for example from the DFT run the
-parameters were fitted to. A common Fermi level would require collecting the energies of
-both channels before \fn{find\_crystal\_occupations}. That is left for later
-(Section~\ref{sec:todo}). Band structures, $H(\mathbf{k})$, $S(\mathbf{k})$ and the DOS of
-each channel do not depend on this choice.
+Each channel fills its own levels with one electron per state. By default this is a
+fixed-moment calculation: the user sets $N_\uparrow$ and $N_\downarrow$ (or each channel
+gets half of the electrons), and each channel has its own Fermi level
+(\texttt{\#Fermi\_Energy} in its \texttt{.out}).
+
+\paragraph{Common Fermi level (\opt{--common-fermi}).} Physically the two channels share
+one Fermi level, and $N_\uparrow$, $N_\downarrow$ come out of it. The channels are
+separate processes, so the energies are collected by the parent. In
+\fn{inner\_wrapper}, right after \fn{sort\_avg\_prop\_info} and before
+\fn{find\_crystal\_occupations}, each child calls \fn{spin\_exchange\_fermi}, which sends
+its sorted energies (all $k$ points) to the parent and waits. The parent merges the two
+lists and fills the lowest $N n_k$ states with one electron each, the same rule as
+\fn{find\_crystal\_occupations} (which fills by count, every $k$ point alike). Electrons
+in a group of levels degenerate with the last occupied one (within \var{DEGEN\_TOL}) are
+shared equally by the states of the group, also across channels. The count of filled
+states of each channel, divided by $n_k$, is its $N_\sigma$, which goes back to the child
+and replaces \var{cell->num\_electrons}. The child then fills its own levels with
+$N_\sigma$ electrons, which gives the same occupations as a common Fermi level. The test
+suite checks exactly this: a run with \opt{--common-fermi} gives the same channel outputs
+as a run with \opt{--nelec-up/--nelec-down} set to the reported $N_\sigma$.
+
+\paragraph{Summary file.} \texttt{<input>.spin} (written by the parent in every
+spin-polarized run) for bcc Fe with the fitted tables of Section~\ref{sec:examples}:
+\begin{lstlisting}[style=sh]
+#COMMON_FERMI: yes
+#Fermi_Energy:  -14.376729
+#Fermi_Energy_up:  -14.376729
+#Fermi_Energy_down:  -14.400753
+#ELECTRONS_UP:  4.982000
+#ELECTRONS_DOWN:  3.018000
+#MAGNETIC_MOMENT:  1.964000   ; N_up - N_down per cell (Bohr magnetons)
+#Average_Energy:  -134.104417   ; up + down (eV)
+; atom      pop_up     pop_down   net_charge   moment
+1 FE     4.982000   3.018000  -0.000000   1.964000
+\end{lstlisting}
+The per-channel Fermi energies are the highest occupied level of each channel, so the
+common one is the larger of the two. The populations per atom are half of the valence
+electrons minus the net charge of each channel; the moment is $p_\uparrow-p_\downarrow$.
+
+\paragraph{COOP of a channel.} \fn{eval\_COOP} returns the COOP of a state with two
+electrons, and the original curve uses it as is. In a channel each state holds one
+electron, so the COOP curve is now scaled by \var{max\_occup}/2 (the average COOP values,
+which use the occupations, were already right). With \var{max\_occup} $=2$ nothing
+changes. Band structures, $H(\mathbf{k})$, $S(\mathbf{k})$ and the DOS of each channel do
+not depend on the choice of occupations.
 
 \subsection{Matrices}
 
@@ -648,7 +765,7 @@ element, produces a non-fatal \fn{error} message.
 \subsection{\file{soc.c}, function by function}
 
 The whole SOC implementation is in the new file \file{soc.c}. It keeps its state in
-file-scope \texttt{static} variables, so the rest of the program only sees seven small
+file-scope \texttt{static} variables, so the rest of the program only sees a few small
 functions (declared in \file{prototypes.h}):
 
 \begin{center}
@@ -659,9 +776,11 @@ functions (declared in \file{prototypes.h}):
 soc\_active() & true when \opt{--soc} was given (\var{soc\_file\_name} $\neq$ NULL) \\
 soc\_num\_states() & $2n$ \\
 soc\_setup(cell, details, n, lookup) & once, after \fn{read\_inputfile}: checks the options, reads $\lambda$, builds $\Hsoc$, allocates work space, writes \texttt{.SOC} \\
-soc\_kpoint(cell, details, ik, nk, HK, SK, n) & called in the $k$-point loop: spinor matrices, dumps, eigenvalues \\
+soc\_kpoint(cell, details, ik, nk, HK, SK, n) & called in the $k$-point loop (and once for a molecule): spinor matrices, printing and dumps, eigenvalues and eigenvectors, per-$k$ properties, storage for the average properties \\
 soc\_band\_energies(details, HK, SK, n) & called in the band-structure loop: returns the $2n$ eigenvalues \\
-soc\_avg\_props(cell, details, \&E\_F) & Fermi level and total DOS from the spinor energies \\
+soc\_print\_spin\_moments(\ldots) & average spin moments per atom (after the average occupations) \\
+soc\_build\_down\_hamiltonian(\ldots) & SOC with two spin tables: $H^\downarrow(R)$ (Section~\ref{sec:socspin}) \\
+soc\_state\_energy(J), soc\_chg\_element(J, $\mu$) & spinor energies and charge-matrix elements for the Walsh output \\
 \bottomrule
 \end{tabularx}
 \end{center}
@@ -669,13 +788,18 @@ soc\_avg\_props(cell, details, \&E\_F) & Fermi level and total DOS from the spin
 \paragraph{\fn{soc\_setup}.}
 \begin{enumerate}
 \item Refuses what is not implemented with SOC yet, naming the offending option (macro
-  \texttt{SOC\_REFUSE}): molecules, THIN mode, projected DOS, COOP/COHP, FMO/FCO, charge
-  iteration, Walsh diagrams, MO printing, zeta variation, printing of $H$/$S$, wave
-  functions, overlap populations, charge matrices, net charges, alternate occupations,
-  sparse dumps, moments and netCDF. It also requires a LAPACK build.
-\item Reads the SOC file (\fn{read\_soc\_file}), sets \var{max\_occup} $=1$ and allocates
-  the dense $\Hsoc$ (\var{socR}, \var{socI}, $2n\times2n$), the packed spinor matrices
-  \var{Hs}, \var{Ss}, the complex LAPACK copies and the work arrays.
+  \texttt{SOC\_REFUSE}): FMO/FCO, \texttt{MO print}, zeta variation, modified Mulliken
+  analysis, sparse dumps, the molecular electrostatic energy, netCDF, and the Walsh items
+  that follow single MO coefficients. It also requires a LAPACK build.
+\item With \opt{--parm-down} (SOC with two spin tables) reads the spin-down $H_{ii}$
+  (\fn{soc\_setup\_two\_tables}, Section~\ref{sec:socspin}).
+\item Reads the SOC file (\fn{read\_soc\_file}), sets \var{max\_occup} $=1$ and
+  \var{num\_spin\_comp} $=2$, and allocates the dense $\Hsoc$ (\var{socR}, \var{socI},
+  $2n\times2n$), the packed spinor matrices \var{Hs}, \var{Ss}, the complex LAPACK copies,
+  the eigenvector parts (\var{vupR}, \var{vupI}, \var{vdnR}, \var{vdnI}, $2n\times n$
+  each), the charge matrix and its spin part, and the work arrays. \fn{soc\_setup} runs
+  before \fn{allocate\_matrices}, which then sizes the average-properties arrays for $2n$
+  states (Section~\ref{sec:socprops}).
 \item Loops over the atoms. For each atom it finds the first orbital of its $p$, $d$ and
   $f$ shells from \var{orbital\_lookup\_table} and the principal quantum numbers, matches
   the element against the file entries, and adds the four spin blocks of
@@ -696,10 +820,6 @@ socI[dn_a*n2+up_b] += h*(Lx[a][b].im + Ly[a][b].re);
   $\Hsoc$. With this file, the spinor $H(\mathbf{R})$ can be rebuilt outside the program
   from a spinless run as $I_2\otimes H(\mathbf{R})+\delta_{\mathbf{R},0}\Hsoc$, for
   example to export a tight-binding model.
-\item If average properties are requested, allocates its own
-  \var{avg\_prop\_info\_type} array that holds only $2n$ energies per $k$ point (the
-  \var{orbs}, \var{chg\_mat}, \ldots\ pointers stay NULL), and a
-  \var{K\_orb\_ptr\_type} ordering array of length $2n\,n_k$.
 \end{enumerate}
 
 \paragraph{\fn{build\_spinor} (static).} Builds the packed spinor matrices from the
@@ -715,10 +835,12 @@ where $H_{pq}$ is read from the spinless packed array with Eq.~\eqref{eq:packed}
 convention, so the LAPACK copy below diagonalizes exactly $H_{\mathrm{sp}}$.
 
 \paragraph{\fn{diag\_spinor} (static).} The same copy into a complex matrix as in
-\file{kpoints.c}, then \texttt{zhegv} (or \texttt{zheev} with \texttt{diag\_wo\_overlap})
-with \texttt{jobz='N'}: only eigenvalues are needed for now. The integer arguments are
-passed the same way as in the existing calls. The error code goes to the
-\texttt{.status} file.
+\file{kpoints.c}, then \texttt{zhegv} (or \texttt{zheev} with \texttt{diag\_wo\_overlap}),
+with \texttt{jobz='V'} when eigenvectors are needed (everything except \texttt{just
+average energy} and the band structure) and \texttt{jobz='N'} otherwise. The integer
+arguments are passed the same way as in the existing calls. The error code goes to the
+\texttt{.status} file. \fn{extract\_vectors} then splits column $J$ of the result
+(normalized as $Z^\dagger S_{\mathrm{sp}} Z=1$) into its spin-up and spin-down parts.
 
 \paragraph{\fn{soc\_kpoint}.} Called from \fn{loop\_over\_k\_points} for each $k$ point,
 \emph{after} the spinless $H(\mathbf{k})$ and $S(\mathbf{k})$ have been built and
@@ -730,21 +852,22 @@ passed the same way as in the existing calls. The error code goes to the
       continue;
     }
 \end{lstlisting}
-It builds the spinor matrices and writes them to \texttt{.HAM}/\texttt{.OV} if requested
-(same binary format, header \texttt{nk}, $2n$; the files are opened at the first $k$ point
-and closed at the last). Then it diagonalizes, prints the energies to the \texttt{.out}
-if \texttt{energy levels} printing is on, and stores them for the Fermi level.
+It builds the spinor matrices, prints them (real and imaginary parts) if $H$ or $S$
+printing is on, and writes them to \texttt{.HAM}/\texttt{.OV} if requested (same binary
+format, header \texttt{nk}, $2n$; the files are opened at the first $k$ point and closed
+at the last). Then it diagonalizes, computes the charge matrix
+(\fn{spinor\_charge\_matrix}), does the per-$k$ properties (\fn{soc\_postprocess}: wave
+functions, energies and occupations, Mulliken overlap populations, net charges and spin
+moments, charge matrices; for a molecule this is the whole output) and stores the $2n$
+states in \var{avg\_prop\_info}[$k$] for the average properties.
 
 \paragraph{\fn{soc\_band\_energies}.} The band-structure loop in \file{bands.c} gets the
 same kind of branch. It prints the $2n$ eigenvalues in the usual \texttt{.band} format.
 The header line becomes \texttt{2n orbitals in the unit cell.}, so programs that read
 \texttt{.band} files need no change.
 
-\paragraph{\fn{soc\_avg\_props}.} \file{driver.c} calls it instead of the spinless
-average-properties block when SOC is on. It reuses the existing routines with the
-spinor dimension: \fn{sort\_avg\_prop\_info}, \fn{find\_crystal\_occupations} (with
-\var{max\_occup} $=1$) and \fn{gen\_total\_DOS}. None of them touches eigenvectors.
-It then writes the \texttt{\#Fermi\_Energy} line.
+\paragraph{Average properties.} There is no separate SOC path any more: with the states
+stored, \file{driver.c} runs the usual average-properties block (next subsection).
 
 \subsection{Cost}
 
@@ -753,14 +876,95 @@ one per $k$ point. The real-space matrices ($S(R)$, $H(R)$) and the Bloch sums a
 those of the spinless problem, so building $H(\mathbf{k})$ costs the same as before. The
 extra memory is a few $2n\times2n$ arrays.
 
+\subsection{Properties with SOC}\label{sec:socprops}
+
+A spinor state $\psi_J$ has, for each spinless orbital $\mu$, a spin-up and a spin-down
+coefficient, $c_{\mu\uparrow}^J$ and $c_{\mu\downarrow}^J$. Since
+$S_{\mathrm{sp}}=I_2\otimes S$ has no matrix elements between the spins, every
+Mulliken-type quantity of $\psi_J$ is the sum of the same quantity for its two spin parts:
+\begin{equation}
+q^J_\mu = \sum_{\sigma}\mathrm{Re}\Big(c^{J*}_{\mu\sigma}\sum_\nu S_{\mu\nu}c^J_{\nu\sigma}\Big),
+\qquad
+\mathrm{COOP}^J_{\mu\nu} = \sum_\sigma \mathrm{COOP}_{\mu\nu}\big(c^J_{\cdot\sigma}\big).
+\end{equation}
+There are no cross terms between spins. This is exact, and it is what the program does:
+\begin{itemize}
+\item A new global \var{num\_spin\_comp} (1, or 2 with SOC) gives the number of states per
+  $k$ point, $n\cdot$\var{num\_spin\_comp}. \file{memory.c} sizes the energies, the charge
+  matrix (\var{chg\_mat}, $2n\times n$) and the ordering array with it, and allocates two
+  new fields of \var{avg\_prop\_info\_type}: \var{orbs\_dn}, \var{orbsI\_dn} (spin-down
+  parts; the spin-up parts go in the old \var{orbs}, \var{orbsI}) and \var{chg\_spin}
+  (spin-up minus spin-down part of the charge matrix). Without SOC they stay NULL.
+\item \fn{sort\_avg\_prop\_info}, \fn{find\_crystal\_occupations}, \fn{gen\_total\_DOS},
+  \fn{gen\_projected\_DOS} and the two COOP generators loop over
+  $n\cdot$\var{num\_spin\_comp}$\cdot n_k$ states, and the ``states are present'' lines use
+  \var{num\_spin\_comp}\,$\cdot$\,\var{max\_occup}. Everything that reads
+  \var{chg\_mat}[state][orbital] (AO occupations, net charges, projected DOS, charge
+  iteration) works unchanged, since a row of the charge matrix is indexed by orbital.
+\item \fn{eval\_COOP} became a wrapper that adds the COOP of the spin-up part
+  (\var{orbs}) and of the spin-down part (\var{orbs\_dn}); \fn{calc\_avg\_OP} adds both
+  parts too. Atom and orbital numbers keep their spinless meaning. COHP uses the
+  spinless EHT matrix elements, so the on-site SOC term is not in the COHP.
+\item \fn{soc\_print\_spin\_moments} adds the occupied \var{chg\_spin} with the
+  normalization of \fn{calc\_avg\_occups} and prints $m_z=N_\uparrow-N_\downarrow$ per atom
+  (zero without magnetism, by time reversal).
+\item Molecules: \fn{loop\_over\_k\_points} passes $H(R)$, $S(R)$ to \fn{soc\_kpoint}
+  (one ``$k$ point''), and \fn{soc\_postprocess} prints what \fn{postprocess\_results}
+  prints for a molecule: the $2n$ levels with their occupations and the total energy,
+  and the populations and charges asked for. The symmetry labels of the MOs are not
+  computed (they would need double groups).
+\item Walsh diagrams: \file{walsh.c} reads orbital energies and charge-matrix elements of
+  the spinor states (\fn{soc\_state\_energy}, \fn{soc\_chg\_element}).
+\item THIN mode: the spinor matrices are built from the THIN $H(\mathbf{k})$,
+  $S(\mathbf{k})$ (band structures and energies; THIN has no average properties).
+\end{itemize}
+
+The tests check this with $\lambda=0$ (every property equals the spinless one, the DOS
+twice the states) and with the MoS$_2$ parameters, where the average net charges agree
+with an independent numpy calculation from the spinor eigenvectors to $4\times10^{-7}$.
+
 \subsection{What is not done with SOC yet}\label{sec:soclimits}
 
-The properties that need eigenvectors are refused with SOC: Mulliken populations and
-charges, projected DOS, COOP/COHP, FMO/FCO, MO printing, Walsh diagrams, charge iteration
-and netCDF. Molecules and THIN mode are also refused, as is SOC combined with spin
-polarization. Most of these extensions are direct. A spinor eigenvector has an up and a
-down component for each orbital, so orbital populations and projected DOS are sums over the two
-components, while COOP needs the cross terms. See Section~\ref{sec:todo}.
+FMO/FCO analysis (the fragment orbitals would be spinless and the crystal orbitals
+spinors; the \texttt{.FMO} file and its viewkel reader would have to change), the
+\texttt{.MO} files for viewkel contour plots (spinors are complex two-component
+functions), zeta variation, modified Mulliken analysis, sparse dumps, the molecular
+electrostatic energy and netCDF. They stop the program with a message naming the
+option.
+
+%=====================================================================
+\section{SOC on top of two spin channels}\label{sec:socspin}
+%=====================================================================
+
+\begin{lstlisting}[style=sh]
+bind --soc soc.dat --parm-up up.dat --parm-down down.dat [--const-up K1 --const-down K2] input
+\end{lstlisting}
+gives one calculation (one process, outputs without suffix) with
+\begin{equation}
+H_{\mathrm{sp}}(\mathbf{k}) = \begin{pmatrix} H^\uparrow(\mathbf{k}) & 0\\ 0 & H^\downarrow(\mathbf{k})\end{pmatrix} + \Hsoc,
+\qquad S_{\mathrm{sp}}(\mathbf{k}) = I_2\otimes S(\mathbf{k}),
+\end{equation}
+a collinear magnetic model along $z$ plus spin--orbit coupling. The overlap must be the
+same in both channels, so the two tables may differ only in $H_{ii}$; the program stops
+if the basis or a zeta differs. The electron count is that of the input, with one Fermi
+level for all $2n$ states (\opt{--nelec-*} and \opt{--common-fermi} do not apply).
+
+\paragraph{Implementation.} In EHT, $H(\mathbf{k})$ is the elementwise product of a fixed
+matrix $h_{ij}$ (the $H_{ii}$ on the diagonal and $K(H_{ii}+H_{jj})/2$, or the weighted
+formula, off it) with $S(\mathbf{k})$; \fn{full\_R\_space\_Hamiltonian} builds $h$ and
+\fn{build\_k\_hamil\_FAT} does the product. \fn{soc\_setup\_two\_tables} reads the
+spin-down table with \fn{fill\_atomic\_parms} into a copy of the atoms (special atoms of
+the input keep their parameters in both channels), checks the zetas and keeps the
+spin-down $H_{ii}$. Each time \file{driver.c} builds $h^\uparrow$ it calls
+\fn{soc\_build\_down\_hamiltonian}, which swaps in the spin-down $H_{ii}$ and $K$, calls
+\fn{full\_R\_space\_Hamiltonian} for $h^\downarrow$ and swaps back. \fn{build\_spinor}
+takes the spin-down block from $h^\downarrow\circ S(\mathbf{k})$. Everything else
+(properties, dumps, bands) is the SOC code of the previous section, so the spin moments
+give the magnetization.
+
+\paragraph{Checks.} With $\lambda=0$ the bands are exactly the bands of the two spin
+channels together, and the Fermi level, average energy and spin moment equal those of a
+spin-polarized run with \opt{--common-fermi} (Fe: $1.892\,\mu_B$ in both).
 
 %=====================================================================
 \section{The $K$ of the diagonal term: \texttt{THE CONST DIAG}}\label{sec:kdiag}
@@ -813,7 +1017,7 @@ prefers that as the default is a decision for the maintainers. The change is a s
 line in \fn{set\_details\_defaults}.
 
 %=====================================================================
-\section{Small fixes}
+\section{Small fixes}\label{sec:fixes}
 %=====================================================================
 
 \paragraph{\texttt{.HAM} truncation.} In \fn{loop\_over\_k\_points} the \texttt{.OV} dump
@@ -824,26 +1028,67 @@ have \texttt{O\_TRUNC}.
 
 \paragraph{THIN off-diagonal $K$.} See Section~\ref{sec:kdiag}.
 
+\paragraph{$k$-point weights in the projected DOS.} \fn{gen\_projected\_DOS} adds the
+contributions of the states that lie within \var{DOS\_DEGEN\_TOL} of each other. Inside
+that loop the original code advanced to the next state \emph{before} multiplying the
+contribution by its $k$-point weight, so each degenerate state got the weight of the next
+one, and the last state of the list got no weight at all:
+\begin{lstlisting}[style=diff]
+-          j++;
+-          if( j < tot_num_orbs ){
+-            diff = ... ;
+-            accum *= (real)details->K_POINTS[orbital_ordering[j].Kpoint].weight;
+-          }
++          accum *= (real)details->K_POINTS[orbital_ordering[j].Kpoint].weight;
++          j++;
++          if( j < tot_num_orbs ){
++            diff = ... ;
++          }
+\end{lstlisting}
+With unequal weights the projections did not add up to the total DOS (CoNb4Si: the three
+atom projections summed to 77.63 states against 77.81 in the total DOS); now they do.
+This changes the projected DOS curves of the original program (and only them), which
+is why the regression test compares the \texttt{.out} files without those curves. It
+showed up because with SOC every level is (Kramers) degenerate.
+
+\paragraph{COOP curves of a spin channel.} See Section~\ref{sec:spinocc}.
+
+\paragraph{viewkel.} Section~\ref{sec:viewkel}.
+
 %=====================================================================
 \section{File-by-file reference}
 %=====================================================================
 
-This section lists every modified file with its changes. Line numbers refer to the
-branch at commit \texttt{722ba73}.
+This section lists every modified file with its changes.
 
 \begin{description}[style=nextline,leftmargin=1.2em]
-\item[\file{tightbind/soc.c} (new, 539 lines)] See Section~\ref{sec:soc}. It carries
+\item[\file{tightbind/soc.c} (new, about 960 lines)] See Sections~\ref{sec:soc}
+  and~\ref{sec:socspin}. Static helpers: \fn{real\_orbital\_U}, \fn{angular\_momentum},
+  \fn{read\_soc\_file}, \fn{packed\_get}, \fn{build\_spinor}, \fn{diag\_spinor},
+  \fn{extract\_vectors}, \fn{spinor\_charge\_matrix}, \fn{print\_spinor\_matrix},
+  \fn{soc\_postprocess}, \fn{open\_dump}, \fn{soc\_setup\_two\_tables}. It carries
   the same BSD 2-clause header as the other source files. Includes only
   \file{bind.h}. It does not use \texttt{<complex.h>}, because \file{bind.h} already
   defines a type called \texttt{complex}; the few complex products are written out with a
   small \texttt{\{re, im\}} struct.
 
+\item[\file{tightbind/spin.c} (new, about 330 lines)] Section~\ref{sec:spin}.
+  Globals \var{spin\_pipe\_out}, \var{spin\_pipe\_in}, \var{spin\_common\_fermi},
+  \var{spin\_input\_electrons}; \fn{write\_all}/\fn{read\_all} (loops over partial
+  pipe reads and writes); child side \fn{spin\_exchange\_fermi} and
+  \fn{spin\_send\_summary}; parent side \fn{common\_fermi} (merge, fill, degenerate group)
+  and \fn{spin\_parent\_loop} (lock-step messages, stops the other child if one dies,
+  writes \texttt{.spin}).
+
 \item[\file{tightbind/main.c}] New static helpers \fn{channel\_name} (output name with
   suffix) and \fn{usage}. New parser for \opt{--parm-up}, \opt{--parm-down},
-  \opt{--nelec-up}, \opt{--nelec-down}, \opt{--const-up}, \opt{--const-down}, \opt{--soc},
-  \opt{-h}. Spin-polarized dispatch with \fn{fork}/\fn{waitpid}
-  (\texttt{\#include <sys/wait.h>} outside \texttt{\_MSC\_VER}). The plain call path is
-  unchanged.
+  \opt{--nelec-up}, \opt{--nelec-down}, \opt{--const-up}, \opt{--const-down},
+  \opt{--common-fermi}, \opt{--soc}, \opt{-h}. Spin-polarized dispatch with
+  \fn{fork}/\fn{waitpid} (\texttt{\#include <sys/wait.h>} outside \texttt{\_MSC\_VER}),
+  two pipes per child, \texttt{SIGPIPE} ignored, and \fn{spin\_parent\_loop} while the
+  children run. \opt{--soc} with the two tables sets \var{soc\_parm\_down},
+  \var{soc\_const\_up/down} and calls \fn{run\_bind} once with the up table. The plain
+  call path is unchanged.
 
 \item[\file{tightbind/driver.c}]
   \begin{itemize}[nosep]
@@ -854,9 +1099,28 @@ branch at commit \texttt{722ba73}.
     charge iteration).
   \item \fn{soc\_setup} called after \fn{check\_for\_errors}; \texttt{\#THE\_CONST\_DIAG}
     printed when not default.
-  \item \fn{inner\_wrapper}: \fn{soc\_avg\_props} instead of the spinless average
-    properties when SOC is on.
+  \item \fn{inner\_wrapper}: \fn{spin\_exchange\_fermi} after \fn{sort\_avg\_prop\_info};
+    \fn{soc\_build\_down\_hamiltonian} after each build of $H(R)$;
+    \fn{soc\_print\_spin\_moments} after \fn{print\_avg\_occups}; the Fermi-level comment
+    counts $n\cdot$\var{num\_spin\_comp} states. The separate SOC branch of the first
+    version is gone.
+  \item \fn{run\_bind\_ex}: \var{spin\_input\_electrons}; checks for
+    \opt{--common-fermi} (no alternate occupations, extended system with average
+    properties); \fn{spin\_send\_summary} after \fn{inner\_wrapper}.
   \end{itemize}
+
+\item[\file{tightbind/memory.c}] Average-properties arrays sized with
+  \var{num\_spin\_comp}; \var{orbs\_dn}, \var{orbsI\_dn}, \var{chg\_spin} allocated with
+  SOC and freed in \fn{cleanup\_memory}.
+
+\item[\file{tightbind/COOP\_stuff.c}] The old \fn{eval\_COOP} is now the static
+  \fn{eval\_COOP\_spin}\texttt{(spin, \ldots)}, which takes the spin-up or spin-down
+  coefficients; the public \fn{eval\_COOP} adds the two with SOC. The two COOP generators
+  loop over $n\cdot$\var{num\_spin\_comp}$\cdot n_k$ states and scale the curve by
+  \var{max\_occup}/2.
+
+\item[\file{tightbind/walsh.c}] \texttt{PRT\_ORB\_ENERGY} and \texttt{PRT\_CHG\_MAT} read
+  spinor states with SOC.
 
 \item[\file{tightbind/kpoints.c}] SOC branch before the printing/dumping of $H$/$S$;
   \texttt{O\_TRUNC} for \texttt{.HAM}.
@@ -868,21 +1132,30 @@ branch at commit \texttt{722ba73}.
 
 \item[\file{tightbind/fileio.c}] Keyword \texttt{THE CONST DIAG}.
 
-\item[\file{tightbind/bind.h}] Field \var{the\_const\_diag}; \texttt{extern}
+\item[\file{tightbind/bind.h}] Field \var{the\_const\_diag}; fields \var{orbs\_dn},
+  \var{orbsI\_dn}, \var{chg\_spin} of \var{avg\_prop\_info\_type}; \texttt{extern}
   declarations of \var{max\_occup}, \var{spin\_channel}, \var{spin\_nelec},
-  \var{spin\_const}, \var{soc\_file\_name}; macro \var{VALENCE\_FRACTION}.
+  \var{spin\_const}, \var{soc\_file\_name}, \var{num\_spin\_comp}, \var{soc\_parm\_down},
+  \var{soc\_const\_up/down} and the \file{spin.c} globals; macro
+  \var{VALENCE\_FRACTION}.
 
 \item[\file{tightbind/globals.c}] Definitions of the new globals with their defaults
   (2.0, 0, $-1$, $-1$, NULL).
 
-\item[\file{tightbind/prototypes.h}] \fn{run\_bind\_ex} and the six public
-  \file{soc.c} functions.
+\item[\file{tightbind/prototypes.h}] \fn{run\_bind\_ex}, the public \file{soc.c} and
+  \file{spin.c} functions.
 
 \item[\file{tightbind/mulliken.c}, \file{avg\_props.c}, \file{DOS\_stuff.c},
   \file{genutil.c}] Occupation and valence-fraction changes of Section~\ref{sec:occ}.
+  \file{avg\_props.c}: $2n$ states in \fn{sort\_avg\_prop\_info} and
+  \fn{find\_crystal\_occupations}, spin sum in \fn{calc\_avg\_OP}. \file{DOS\_stuff.c}: $2n$
+  states, ``states are present'' with \var{num\_spin\_comp}, fix of the $k$ weights of the
+  projected DOS.
+
+\item[\file{viewkel/*}] Section~\ref{sec:viewkel}.
 
 \item[\file{tightbind/CMakeLists.txt}, \file{Makefile}, \file{makefile.linux}]
-  \file{soc.c} / \file{soc.o} added. \file{CMakeLists.txt} also installs
+  \file{soc.c}, \file{spin.c} / \file{soc.o}, \file{spin.o} added. \file{CMakeLists.txt} also installs
   \file{license.txt} in \file{share/yaehmop/}, because the BSD license must go with
   binary redistributions. The other legacy makefiles (AIX, HP, IBM, SGI, win32)
   were not updated.
@@ -909,7 +1182,7 @@ everything in a temporary directory:
 python3 tests/spin_soc/run_tests.py --bind build/bind [--ref-bind <original bind>]
 \end{lstlisting}
 \texttt{--ref-bind} points to a build of the original program (commit \texttt{4ded45b})
-and adds the regression tests. The script reports 40 checks:
+and adds the regression tests. The script reports 69 checks:
 
 \begin{longtable}{p{4.2cm} p{10.6cm}}
 \toprule
@@ -917,7 +1190,11 @@ and adds the regression tests. The script reports 40 checks:
 \midrule
 \endhead
 regression & \texttt{.out} and \texttt{.band} of the examples diamond, XeF4, Te2Br and
-CoNb4Si are byte-identical to the original program. \\
+CoNb4Si are byte-identical to the original program (for Te2Br and CoNb4Si the
+\texttt{.out} without the projected DOS curves, Section~\ref{sec:fixes}). Outside the
+script, all 8 examples of \file{examples/} (26 output files, with \texttt{.MO},
+\texttt{.FMO}, \texttt{.walsh}, \texttt{.DMAT}) were compared the same way. \\
+projected DOS & the atom projections of CoNb4Si add up to the total DOS. \\
 spin, same tables & with the default table in both channels, each channel's
 \texttt{.band}, \texttt{.HAM}, \texttt{.OV} and Fermi level equal the spinless run; each
 channel has half of the electrons. \\
@@ -938,7 +1215,25 @@ bands, the spinor $H(\mathbf{k})$ and $S(\mathbf{k})$ written by \file{soc.c} eq
 independent numpy construction (difference 0); the bands agree to $9\times10^{-6}$~eV in
 the window VBM$-6$ to VBM$+4$~eV; the valence splitting at K (0.1650~eV) and the gap
 (2.3130 $\to$ 2.2681~eV) match the fit. \\
-errors & \opt{--parm-up} without \opt{--parm-down}, SOC with spin, SOC in a molecule. \\
+SOC properties, $\lambda=0$ & CoNb4Si: Fermi level, average energy, net charges and
+average COOPs equal the spinless ones; total and projected DOS are twice the spinless
+ones; COOP curves equal; spin moment 0. \\
+SOC charges, MoS$_2$ & average net charges on a $6\times6$ mesh equal an independent numpy
+calculation from the spinor eigenvectors ($4\times10^{-7}$); they add up to 0. \\
+SOC molecule & XeF$_4$ with $\lambda=0$: net charges and total energy equal the spinless
+ones; with $\lambda\ne0$, 40 levels in Kramers pairs. \\
+SOC THIN, Walsh & THIN bands equal FAT bands; Walsh diagram of ethane with $\lambda=0$:
+net charge and total energy columns equal the spinless ones. \\
+common Fermi level & bcc Fe: $N_\uparrow+N_\downarrow=8$; common $E_F$ is the larger
+channel $E_F$; moment $>1\,\mu_B$; each channel equals a run with \opt{--nelec-*} fixed to
+its $N_\sigma$; the summary of a fixed run says so. \\
+COOP of a channel & same tables: COOP curves and average COOPs of a channel are half of
+the spinless ones. \\
+SOC + spin & Fe with the down $H_{ii}$ and the up zetas, $\lambda=0$: bands are the two
+channels together (difference 0), Fermi level and moment equal the common-Fermi spin run;
+$\lambda=0.06$ eV changes the moment a little; different zetas are refused. \\
+errors & \opt{--parm-up} without \opt{--parm-down}; SOC + spin with \opt{--nelec-up};
+\opt{--common-fermi} without tables; SOC with FMO (message names FMO). \\
 \bottomrule
 \end{longtable}
 
@@ -1024,6 +1319,24 @@ $11\times11\times11$ mesh: $5\times10^{-7}$~eV for the converted file and $10^{-
 \texttt{wtb.x} within $E_F-8\ldots E_F+6$~eV. The larger \texttt{wtb.x} error comes from
 single precision with the nearly singular $S(\mathbf{k})$ of Fe.
 
+
+\paragraph{The new kinds of run.} The interface detects the kind of run from the files
+next to the input, so the new features need almost nothing:
+\begin{itemize}
+\item \emph{SOC with two spin tables} writes one $2n\times2n$ spinor \texttt{.HAM}/\texttt{.OV}
+  and \texttt{\#SOC\_STATES} in the \texttt{.out}, so it is converted as a SOC run
+  (\texttt{huckel-SOC.dat}); $H(\mathbf{R})$ is complex because of $\Hsoc$, as in any SOC
+  run. Checked with bcc Fe ($11^3$ mesh, $\lambda_d=0.06$ eV): $H(\mathbf{k})$ rebuilt on the
+  mesh to $10^{-12}$ eV.
+\item \emph{Spin polarized with \opt{--common-fermi}}: the script now reads the common
+  Fermi level from \texttt{<input>.spin} (\fn{common\_fermi}) and uses it as the energy
+  zero of \emph{both} channels, so the up and down bands keep their relative position;
+  the electrons of each channel are read from
+  \texttt{\#ELECTRONS\_THIS\_CHANNEL\_COMMON\_FERMI}. In a fixed-moment run each channel
+  keeps its own Fermi level as zero, as before (the channels are then aligned at the DFT
+  Fermi level they were fitted to), and the script prints a note saying so.
+\end{itemize}
+
 \begin{figure}[H]
 \centering
 \includegraphics[width=\textwidth]{../interface/example_MoS2/bands_yaehmop_vs_wtb.png}
@@ -1033,14 +1346,160 @@ point), relative to the VBM.}
 \label{fig:wtb}
 \end{figure}
 
+
+%=====================================================================
+\section{The viewer: \texttt{viewkel}}\label{sec:viewkel}
+%=====================================================================
+
+\texttt{viewkel} is the X11/Tektronix/PostScript viewer of YAeHMOP. It shares no code
+with \texttt{tightbind}: it only reads output files (\texttt{.band} directly; DOS and COOP
+through the files written by \file{fit\_dos} and \file{fit\_coop} from the \texttt{.out}).
+So the question for each new feature is whether the files it reads are still right and
+whether it can show what is new.
+
+\subsection{What works without changes}
+\begin{itemize}
+\item SOC: the \texttt{.band} file has the same format with $2n$ bands, and the
+  \texttt{.out} now has the usual DOS, projected DOS and COOP sections, so
+  \file{fit\_dos}/\file{fit\_coop} and the band and property graphs work as they are.
+  Checked with CoNb$_4$Si (bands, projected DOS, COOP), MoS$_2$ and diamond.
+\item Each spin channel alone: its files have the usual formats.
+\item Spinless runs: the outputs read by viewkel (\texttt{.band}, \texttt{.MO},
+  \texttt{.FMO}, \texttt{.walsh}, and the \texttt{.out} sections used by
+  \file{fit\_dos}/\file{fit\_coop}/\file{fit\_walsh}) are unchanged except the projected DOS
+  fix. Before the changes, the 8 examples were run with the original and the new
+  \texttt{bind} and 16 PostScript figures (bands, DOS, COOP, Walsh, FMO) compared equal.
+\end{itemize}
+
+\subsection{Both spin channels in one graph}
+
+What was missing is a spin-polarized picture: up and down bands on the same axes, and the
+DOS of spin down drawn on the negative side. The design uses the names that
+\texttt{bind} gives to the channel files: when viewkel reads a band or property file
+whose name contains \texttt{\_up.}, it looks for the same name with \texttt{\_down.} and,
+if it exists, reads it too and merges it into the same graph. Nothing changes for any
+other file name, and no new command or file format is needed.
+
+\paragraph{Helpers (\file{viewkel/genutil.c}).}
+\begin{lstlisting}
+int spin_partner_file(char *name, char *partner);   /* Fe_up.bind.band -> Fe_down.bind.band */
+int spin_summary_fermi(char *name, float *Fermi_E); /* Fe_up.bind.band -> Fe.bind.spin     */
+\end{lstlisting}
+\fn{spin\_partner\_file} replaces the last \texttt{\_up.} of the base name (not of the
+directory) and returns 1 if the partner can be opened. \fn{spin\_summary\_fermi} removes
+\texttt{\_up}, drops the last extension, adds \texttt{.spin} and reads
+\texttt{\#Fermi\_Energy:} (the common level) or, if there is none,
+\texttt{\#Fermi\_Energy\_up:}. It prints which one it used.
+
+\paragraph{Bands (\file{viewkel/band\_graphs.c}).} \fn{new\_band\_graph} calls the new
+static \fn{add\_spin\_down\_bands} after \fn{read\_band\_data}. It reads the partner into a
+temporary \var{band\_graph\_type} with the same \fn{read\_band\_data}, checks that the
+number of $k$ points and special points agree (and that neither file has fat bands),
+and builds a new \var{raw\_data} array with $n_\uparrow+n_\downarrow$ curves per point:
+\begin{lstlisting}
+for(i=0;i<np;i++){
+  for(j=0;j<nu;j++) raw[i*(nu+nd)+j]    = u->raw_data[i*nu+j];   /* spin up   */
+  for(j=0;j<nd;j++) raw[i*(nu+nd)+nu+j] = d->raw_data[i*nd+j];   /* spin down */
+}
+u->num_curves = nu+nd;
+band_graph->spin_down_start = nu;      /* new field of band_graph_type */
+\end{lstlisting}
+The energy range is extended to both channels and the Fermi level is taken from the
+\texttt{.spin} summary (\var{show\_fermi} on). In \fn{draw\_band\_graph} the only change
+is the line style: curves from \var{spin\_down\_start} on are drawn with the dashed style
+2 (the Fermi line keeps style 1):
+\begin{lstlisting}
+if( band_graph->spin_down_start && i >= band_graph->spin_down_start )
+  g_change_linestyle(2);
+else
+  g_change_linestyle(the_graph->styles[0]);
+\end{lstlisting}
+Everything else (scaling, clipping, tic marks, PostScript output) works on the merged
+curves unchanged.
+
+\paragraph{DOS and COOP (\file{viewkel/prop\_graphs.c}).} \fn{new\_prop\_graph} calls the
+new static \fn{add\_spin\_down\_props} after \fn{read\_graph\_data}. It reads the partner
+(same file type, \texttt{\#DOS DATA} or \texttt{\#COOP DATA}) and requires the same energy
+grid, i.e.\ both files made by \file{fit\_dos}/\file{fit\_coop} with the same window and
+step (otherwise it prints a message and shows one channel). Curve $j$ of spin down
+becomes curve $n_\uparrow+j$:
+\begin{itemize}
+\item DOS: its values are negated, so spin down is drawn to the left of the axis with
+  the same line style as its spin-up partner; COOP: the sign is kept (it carries the
+  bonding character) and the curve is dashed.
+\item The arrays \var{curves\_to\_display}, \var{styles}, \var{fills} and
+  \var{curve\_names} are rebuilt for $n_\uparrow+n_\downarrow$ curves; a spin-down curve is
+  shown when its partner is, and the names get \texttt{\_up}/\texttt{\_down}.
+\item The $x$ range is recomputed (it now has negative values for a DOS); the drawing
+  code already handled negative values (COOP) and draws the zero line.
+\item The integration curves of \file{fit\_dos} are not read for a merged graph (one
+  integration for two channels would be misleading).
+\item After the usual search for \texttt{FERMI\_ENERGY} in the file, the Fermi level of
+  the \texttt{.spin} summary replaces it.
+\end{itemize}
+A new field \var{spin\_down\_start} of \var{prop\_graph\_type} (\file{graph\_objects.h})
+records the split. In the text interface (\file{interface.c}) the command
+\texttt{curve $j$} now also toggles the spin-down partner of curve $j$; in the X
+interface every curve keeps its own button.
+
+\paragraph{Example.} With the CoNb$_4$Si run of the tests (Co $d$ 1 eV higher in the
+down table, \opt{--common-fermi}):
+\begin{lstlisting}[style=sh]
+bind --common-fermi --parm-up up.dat --parm-down dn.dat C.bind
+fit_dos C_up.bind  ;  fit_dos C_down.bind      # same E window, broadening and step
+viewkel                      # Read Props: C_up.bind.DOS  -> both channels, E_F of C.bind.spin
+\end{lstlisting}
+viewkel prints
+\begin{lstlisting}[style=sh]
+Spin-polarized curves: C_up.bind.DOS (curves 1-4) and C_down.bind.DOS (curves 5-8, drawn as negative DOS).
+Fermi level -11.9203 eV from C.bind.spin (common to both channels)
+\end{lstlisting}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figures/viewkel_spin.png}
+\caption{PostScript output of the modified viewkel (text mode). Left: bands of bcc Fe with
+the two fitted tables and \opt{--common-fermi} (spin up solid, spin down dashed, common
+$E_F=-14.38$ eV dotted), read from \texttt{Fe\_up.bind.band}. Middle: CoNb$_4$Si total DOS
+(solid) and Co projection (dotted), spin up to the right and spin down to the left,
+read from \texttt{C\_up.bind.DOS}. Right: Co--Co and Si--Si COOP of the same run, spin
+down dashed.}
+\label{fig:viewkel}
+\end{figure}
+
+\subsection{Old defects fixed on the way}
+
+The figures were made in viewkel's text mode (\texttt{viewkel -t}, commands from a file,
+PostScript output), which did not work in the original program:
+\begin{itemize}
+\item \file{buttons.c}: in text mode every new graph called its
+  \texttt{build\_*\_button\_window}, which creates an X window through
+  \fn{new\_button\_win} without a display, and crashed. Each builder now returns before
+  \fn{new\_button\_win} when \var{doing\_X} is false.
+\item \file{buttons.c}, \fn{free\_but\_win}: objects made in text mode have no button
+  window; at exit the program stopped with ``Can't find a but\_win in the but\_win list''.
+  A NULL window is now ignored.
+\item \file{hierarchy.c}, \fn{free\_obj}: freeing a property graph assumed that an
+  integration was always present and freed the integration structure \emph{before} its
+  arrays (use after free). Both are fixed.
+\end{itemize}
+Known defects left as they were (candidates for a separate viewkel pull request): the
+build without \texttt{-DUSE\_READLINE} and the Tektronix-only build do not compile;
+\file{fit\_walsh} compiles only with \texttt{-DUSE\_BZERO}; with readline, redirected input
+needs \texttt{stdbuf -i0}; \file{add\_dos} and \file{sub\_dos} crash in \fn{main}
+(\fn{strcpy}). The make file does not track headers, so after the change of
+\file{graph\_objects.h} viewkel must be rebuilt from scratch (\texttt{make clean}).
+
 %=====================================================================
 \section{Compatibility and suggestions for the pull request}
 %=====================================================================
 
 \subsection{Backward compatibility}
 \begin{itemize}
-\item Without the new options the output is byte-identical (same LAPACK). The only behavior
-  change visible to existing users is the \texttt{.HAM} truncation, which fixes a bug.
+\item Without the new options the output is byte-identical (same LAPACK), except the
+  projected DOS curves, which change because of the $k$-weight fix
+  (Section~\ref{sec:fixes}). The other behavior change visible to existing users is the
+  \texttt{.HAM} truncation, which also fixes a bug.
 \item \fn{run\_bind} keeps its signature, and \fn{run\_eht} and the library interface
   are untouched.
 \item The default of \texttt{THE CONST DIAG} reproduces the old $H(\mathbf{k})$.
@@ -1068,27 +1527,30 @@ used in the examples and tests come from yaehmop-bandfit (MIT license).
 The changes are independent enough to be reviewed in three steps:
 \begin{enumerate}
 \item \textbf{Fixes}: \texttt{O\_TRUNC} for \texttt{.HAM}; \var{the\_const\_diag} and
-  the keyword \texttt{THE CONST DIAG} (default 1.75); THIN off-diagonal $K$. Small, no new
-  features.
+  the keyword \texttt{THE CONST DIAG} (default 1.75); THIN off-diagonal $K$; $k$ weights
+  of the projected DOS. Small, no new features.
 \item \textbf{Spin polarization}: \var{max\_occup}, \var{VALENCE\_FRACTION},
-  \fn{run\_bind\_ex}, the new parser and \opt{--parm-up/--parm-down/--nelec-*/--const-*}.
-\item \textbf{SOC}: \file{soc.c} and its four call sites, \opt{--soc}, the tests and
-  examples.
+  \fn{run\_bind\_ex}, the new parser, \opt{--parm-up/--parm-down/--nelec-*/--const-*},
+  \file{spin.c} (\opt{--common-fermi}, \texttt{.spin}), COOP scale of a channel.
+\item \textbf{SOC}: \file{soc.c}, \var{num\_spin\_comp} and the changes in
+  \file{memory.c}, \file{avg\_props.c}, \file{DOS\_stuff.c}, \file{COOP\_stuff.c},
+  \file{walsh.c}, \opt{--soc} (with the two-table variant), the tests and examples.
+\item \textbf{viewkel}, separately: the three old defects and the spin-polarized graphs
+  (Section~\ref{sec:viewkel}).
 \item The interface to WanTiBEXOS (\file{interface/}) is a separate Python tool. It can go
   with the SOC step or stay in the fork.
 \end{enumerate}
 
 \subsection{Open items}\label{sec:todo}
 \begin{itemize}
-\item SOC in the remaining features: populations and charges (sum of the up and down
-  components of each orbital), projected DOS, COOP/COHP (cross terms), FMO/FCO, charge
-  iteration, Walsh diagrams, MO and matrix printing, netCDF; SOC for molecules and in THIN
-  mode.
-\item Spin polarization: a Fermi level common to both channels, and a joint summary
-  ($E_F$, $N_\uparrow$, $N_\downarrow$, moment).
-\item SOC together with spin polarization:
-  $H_{\mathrm{sp}}=\mathrm{diag}(H^\uparrow,H^\downarrow)+\Hsoc$ (collinear moment along
-  $z$; needs the same zetas in both channels).
+\item SOC: FMO/FCO, \texttt{.MO} files for viewkel, zeta variation, modified Mulliken,
+  sparse dumps, molecular electrostatics, netCDF (Section~\ref{sec:soclimits}); spin-resolved
+  (up/down) projected DOS of a SOC run.
+\item SOC with two spin tables: charge iteration; different zetas per channel (would need
+  the spin-up/spin-down overlap of different radial functions).
+\item viewkel: the remaining old defects listed in Section~\ref{sec:viewkel}.
+\item yaehmop-bandfit: use the new \texttt{bind} directly (spinor \texttt{.HAM}, the
+  \texttt{\_up}/\texttt{\_down} outputs and \texttt{.spin}).
 \item The legacy makefiles other than \file{Makefile} and \file{makefile.linux}.
 \end{itemize}
 

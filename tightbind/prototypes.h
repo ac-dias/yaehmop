@@ -356,12 +356,23 @@ extern void run_bind_ex PROTO((char *, char *, bool, char *));
 /* soc.c (adias-dev) */
 extern int soc_active PROTO((void));
 extern int soc_num_states PROTO((void));
+extern real soc_state_energy PROTO((int));
+extern real soc_chg_element PROTO((int, int));
 extern void soc_setup PROTO((cell_type *, detail_type *, int, int *));
 extern void soc_kpoint PROTO((cell_type *, detail_type *, int, int,
                               hermetian_matrix_type, hermetian_matrix_type, int));
+extern void soc_build_down_hamiltonian PROTO((cell_type *, detail_type *,
+                                              hermetian_matrix_type, int, int *));
+extern void soc_print_spin_moments PROTO((detail_type *, cell_type *, int,
+                                          K_orb_ptr_type *, avg_prop_info_type *));
 extern real *soc_band_energies PROTO((detail_type *, hermetian_matrix_type,
                                       hermetian_matrix_type, int));
-extern void soc_avg_props PROTO((cell_type *, detail_type *, real *));
+/* spin.c (adias-dev) */
+extern void spin_exchange_fermi PROTO((detail_type *, cell_type *, int, K_orb_ptr_type *));
+extern void spin_send_summary PROTO((cell_type *, detail_type *, prop_type *));
+#ifndef _MSC_VER
+extern int spin_parent_loop PROTO((int *, int *, pid_t *, const char *, char (*)[520], int, real *));
+#endif
 extern void run_eht PROTO((FILE *));
 
 extern int *my_malloc PROTO((long));
