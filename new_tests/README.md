@@ -1,7 +1,7 @@
 # new_tests: band structures with SOC (MoS2) and spin polarization (Fe)
 
-These two examples use the parametrizations fitted with
-[yaehmop-bandfit](https://github.com/tromer-unb/yaehmop-bandfit) and the fork's new options
+These two examples use the parametrizations fitted with yaehmop-bandfit (our
+parameter-fitting tool; its repository is still private) and the fork's new options
 (fork `ac-dias/yaehmop`, see `docs/SPIN_SOC.md`).
 
 | folder      | system                | parametrization                                                          | new options                       |

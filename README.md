@@ -56,6 +56,6 @@ The fork keeps the original BSD 2-clause license ([license.txt](license.txt)). T
 code (`tightbind/soc.c` and the changes to the other files) is under the same license.
 `make install` now also installs `license.txt` (in `share/yaehmop/`), as the license
 requires for binary redistributions. The parameter sets used in `new_tests/` and
-`tests/spin_soc/data/` come from
-[yaehmop-bandfit](https://github.com/tromer-unb/yaehmop-bandfit) (MIT license). When you
+`tests/spin_soc/data/` come from yaehmop-bandfit, our parameter-fitting tool (its
+repository is still private; MIT license). When you
 publish results, cite the YAeHMOP authors (G. A. Landrum and W. V. Glassey) and this fork.
