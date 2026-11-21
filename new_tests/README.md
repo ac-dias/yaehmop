@@ -2,7 +2,7 @@
 
 These two examples use the parametrizations fitted with
 [yaehmop-bandfit](https://github.com/tromer-unb/yaehmop-bandfit) and the fork's new options
-(`adias-dev` branch, see `docs/SPIN_SOC.md`).
+(fork `ac-dias/yaehmop`, see `docs/SPIN_SOC.md`).
 
 | folder      | system                | parametrization                                                          | new options                       |
 |-------------|-----------------------|--------------------------------------------------------------------------|-----------------------------------|

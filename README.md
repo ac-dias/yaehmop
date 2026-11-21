@@ -5,7 +5,7 @@ This software was original written by Greg Landrum during his time in the Hoffma
 The license has been updated to the standard BSD 2-clause license for the github version of the code.
 
 
-## Fork additions (ac-dias/yaehmop, branch adias-dev)
+## Fork additions (ac-dias/yaehmop)
 
 This fork adds spin polarization and spin-orbit coupling to the `tightbind` program
 (`bind`). Runs without the new options give the same output as the original program.

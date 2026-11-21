@@ -1,6 +1,6 @@
-# Spin-polarized runs and spin-orbit coupling (adias-dev)
+# Spin-polarized runs and spin-orbit coupling (fork ac-dias/yaehmop)
 
-Two additions to `bind`, made in the fork `ac-dias/yaehmop` (branch `adias-dev`).
+Two additions to `bind`, made in the fork `ac-dias/yaehmop` (branch `master`).
 Runs without the new options give the same output as the original program.
 
 ```
