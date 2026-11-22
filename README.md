@@ -44,7 +44,9 @@ New features:
   original results. Only the overlap integrals (bands, DOS, COOP, H/S dumps) use the second
   exponent; electrostatics, charge iteration and zeta optimization still use the first
   one, as for double-zeta d. Adapted from the research patch of yaehmop-bandfit
-  (`experimental/carbon_2p_double_zeta.patch`).
+  (`experimental/carbon_2p_double_zeta.patch`). **Pending:** the post-processing routines
+  (`.MO` file for viewkel, netCDF, electrostatics, charge iteration, zeta variation) and
+  viewkel's orbital plots still use only the first p exponent.
 - Fixes: the `.HAM` dump is truncated when it is opened (it used to be appended to); the
   projected DOS uses the right k-point weights (the original curves change slightly).
 

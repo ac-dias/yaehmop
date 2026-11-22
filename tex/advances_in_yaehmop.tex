@@ -1094,8 +1094,9 @@ Every quantity built from the overlaps uses the double-zeta functions: $S(\mathb
 $H(\mathbf{k})$ (through the Wolfsberg--Helmholz formula), bands, DOS, COOP/COHP,
 populations, the \texttt{.HAM}/\texttt{.OV} dumps and SOC. As for double-zeta $d$, the
 molecular electrostatics (\file{electrostat.c}), the charge iteration of the exponents
-(\file{muller.c}) and the zeta variation (\file{zetas.c}) still use only the first
-exponent.
+(\file{muller.c}), the zeta variation (\file{zetas.c}), the \texttt{.MO} file for viewkel
+and the netCDF output still use only the first exponent, and viewkel draws only the inner
+function; updating them is pending (Section~\ref{sec:todo}).
 
 \subsection{Tests}
 \begin{center}
@@ -1671,8 +1672,17 @@ The changes are independent enough to be reviewed in three steps:
 \item viewkel: the remaining old defects listed in Section~\ref{sec:viewkel}.
 \item yaehmop-bandfit: use the new \texttt{bind} directly (spinor \texttt{.HAM}, the
   \texttt{\_up}/\texttt{\_down} outputs and \texttt{.spin}).
-\item Double-zeta $p$ in the electrostatics, charge iteration and zeta variation (as for
-  double-zeta $d$, only the first exponent is used there); double-zeta $s$.
+\item \textbf{Pending: post-processing with double-zeta $p$} (Section~\ref{sec:pdz}). These
+  routines still use only the first $p$ exponent and must learn the second one:
+  the \texttt{.MO} file written for viewkel (\file{genutil.c}, block \texttt{\#begin\_parms},
+  which lists \var{exp\_p} only), the netCDF output (\file{netCDF\_support.c}), the molecular
+  electrostatics (\file{electrostat.c}), the charge iteration of the exponents
+  (\file{muller.c}) and the zeta variation (\file{zetas.c}). Double-zeta $s$ is not
+  supported.
+\item \textbf{Pending: viewkel with double-zeta $p$.} \file{viewkel/fit\_orbs.c} builds a $p$
+  atomic orbital with one exponent (\var{zeta2}$=0$), so MO isosurfaces and contours of a
+  double-zeta $p$ shell are drawn with the inner function only; it must read the second
+  exponent and coefficients from the \texttt{.MO} file once \file{genutil.c} writes them.
 \item The legacy makefiles other than \file{Makefile} and \file{makefile.linux}.
 \end{itemize}
 
