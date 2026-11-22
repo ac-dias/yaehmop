@@ -90,9 +90,13 @@ void mov(real *sigma,real *pi,real *delta,real *phi,int which1,int which2,real d
 
   /* figure out whether or not we are using double zeta f'ns */
 
-  if( (l1 == 2 && atoms[which1].coeff_d2 != 0) || (l1 == 3 && atoms[which1].coeff_f2 != 0) ) num_zeta1 = 2;
+  if( (l1 == 1 && atoms[which1].coeff_p2 != 0) ||
+      (l1 == 2 && atoms[which1].coeff_d2 != 0) ||
+      (l1 == 3 && atoms[which1].coeff_f2 != 0) ) num_zeta1 = 2;
   else num_zeta1 = 1;
-  if( (l2 == 2 && atoms[which2].coeff_d2 != 0) || (l2 == 3 && atoms[which2].coeff_f2 != 0) ) num_zeta2 = 2;
+  if( (l2 == 1 && atoms[which2].coeff_p2 != 0) ||
+      (l2 == 2 && atoms[which2].coeff_d2 != 0) ||
+      (l2 == 3 && atoms[which2].coeff_f2 != 0) ) num_zeta2 = 2;
   else num_zeta2 = 1;
 
   /* get the exponents */
@@ -129,17 +133,19 @@ void mov(real *sigma,real *pi,real *delta,real *phi,int which1,int which2,real d
 
   /* deal with zeta1 - zeta1 overlap */
 
-  if(!(atoms[which1].coeff_d1 || atoms[which1].coeff_f1) || l1 <= 1){
+  if(l1 == 1 && atoms[which1].coeff_p1 != 0.0)
+    coeff_1 = atoms[which1].coeff_p1;
+  else if(!(atoms[which1].coeff_d1 || atoms[which1].coeff_f1) || l1 <= 1)
     coeff_1 = 1;
-  }
   else{
     if(l1 == 2) coeff_1 = atoms[which1].coeff_d1;
     if(l1 == 3) coeff_1 = atoms[which1].coeff_f1;
   }
 
-  if(!(atoms[which2].coeff_d1 || atoms[which2].coeff_f1) || l2 <= 1){
+  if(l2 == 1 && atoms[which2].coeff_p1 != 0.0)
+    coeff_2 = atoms[which2].coeff_p1;
+  else if(!(atoms[which2].coeff_d1 || atoms[which2].coeff_f1) || l2 <= 1)
     coeff_2 = 1;
-  }
   else{
     if(l2 == 2) coeff_2 = atoms[which2].coeff_d1;
     if(l2 == 3) coeff_2 = atoms[which2].coeff_f1;
@@ -178,6 +184,10 @@ void mov(real *sigma,real *pi,real *delta,real *phi,int which1,int which2,real d
   /* now do zeta1 - zeta2 overlap if applicable */
 
   if( num_zeta2 == 2){
+    if( l2 == 1){
+      sk2 = atoms[which2].exp_p2;
+      coeff_2 = atoms[which2].coeff_p2;
+    }
     if( l2 == 2){
       sk2 = atoms[which2].exp_d2;
       coeff_2 = atoms[which2].coeff_d2;
@@ -203,6 +213,10 @@ void mov(real *sigma,real *pi,real *delta,real *phi,int which1,int which2,real d
   /* now do zeta2 - zeta2 */
 
   if( num_zeta1 == 2 ){
+    if( l1 == 1 ){
+      sk1 = atoms[which1].exp_p2;
+      coeff_1 = atoms[which1].coeff_p2;
+    }
     if( l1 == 2 ){
       sk1 = atoms[which1].exp_d2;
       coeff_1 = atoms[which1].coeff_d2;
@@ -227,6 +241,10 @@ void mov(real *sigma,real *pi,real *delta,real *phi,int which1,int which2,real d
     /* finally do zeta2 - zeta1 */
 
     if( num_zeta2 == 2 ){
+      if( l2 == 1){
+        sk2 = atoms[which2].exp_p;
+        coeff_2 = atoms[which2].coeff_p1;
+      }
       if( l2 == 2){
         sk2 = atoms[which2].exp_d;
         coeff_2 = atoms[which2].coeff_d1;

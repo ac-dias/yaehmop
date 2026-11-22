@@ -332,8 +332,13 @@ void write_atom_parms(detail_type *details,atom_type *atoms,int num_atoms,
                 atom->coul_s,atom->exp_s);
       }
       if( atom->np != 0){
-        fprintf(output_file,"\t%dP: %10.4lf %10.4lf\n",atom->np,
-                atom->coul_p,atom->exp_p);
+        if(atom->coeff_p2 != 0)
+          fprintf(output_file,"\t%dP DZ: %10.4lf %10.4lf %10.4lf %10.4lf %10.4lf\n",
+                  atom->np,atom->coul_p,atom->coeff_p1,atom->exp_p,
+                  atom->coeff_p2,atom->exp_p2);
+        else
+          fprintf(output_file,"\t%dP: %10.4lf %10.4lf\n",atom->np,
+                  atom->coul_p,atom->exp_p);
       }
       if( atom->nd != 0){
         fprintf(output_file,"\t%dD: %10.4lf %10.4lf %10.4lf %10.4lf %10.4lf\n",
@@ -699,6 +704,27 @@ void fill_atomic_parms(atom_type *atoms,int num_atoms,FILE *infile,char *parm_fi
             else atoms[i].np = 0;
             atoms[i].exp_p = exp1;
             atoms[i].coul_p = Hii;
+            /* EXPERIMENTAL: support genuine p radial contractions, as for d/f.
+               Contracted STO overlap S12=[4*z1*z2/(z1+z2)^2]^(n+1/2).
+               Keep ordinary single-zeta table exactly equivalent to stock. */
+            atoms[i].coeff_p1 = 1.0;
+            atoms[i].coeff_p2 = 0.0;
+            atoms[i].exp_p2 = 0.0;
+            if(nzeta == 2){
+              if(exp1 <= 0.0 || exp2 <= 0.0)
+                fatal("Invalid p double-zeta exponent");
+              if(c1*c1+c2*c2 <= 0.0)
+                fatal("Invalid p double-zeta coefficients");
+              atoms[i].exp_p2 = exp2;
+              atoms[i].coeff_p1 = c1;
+              atoms[i].coeff_p2 = c2;
+              temp = 4.0*(exp1*exp2/pow(exp1+exp2,2.0));
+              temp = pow(temp,(real)nquant+.5);
+              temp = sqrt(c1*c1+c2*c2+2*temp*c1*c2);
+              if(temp <= 0.0) fatal("Non-positive p contraction norm");
+              atoms[i].coeff_p1 /= temp;
+              atoms[i].coeff_p2 /= temp;
+            }
             break;
           case 'd':
           case 'D':

@@ -274,6 +274,8 @@ static void soc_setup_two_tables(cell_type *cell, detail_type *details, int num_
     }
     if( u->ns != d->ns || u->np != d->np || u->nd != d->nd || u->nf != d->nf ||
         fabs(u->exp_s - d->exp_s) > 1e-8 || fabs(u->exp_p - d->exp_p) > 1e-8 ||
+        fabs(u->exp_p2 - d->exp_p2) > 1e-8 || fabs(u->coeff_p1 - d->coeff_p1) > 1e-8 ||
+        fabs(u->coeff_p2 - d->coeff_p2) > 1e-8 ||
         fabs(u->exp_d - d->exp_d) > 1e-8 || fabs(u->exp_d2 - d->exp_d2) > 1e-8 ||
         fabs(u->coeff_d1 - d->coeff_d1) > 1e-8 || fabs(u->coeff_d2 - d->coeff_d2) > 1e-8 ||
         fabs(u->exp_f - d->exp_f) > 1e-8 || fabs(u->exp_f2 - d->exp_f2) > 1e-8 ||

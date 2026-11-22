@@ -36,6 +36,15 @@ New features:
 - **`THE CONST DIAG <K>`**: new input keyword for the K of the diagonal H_ii(k) term (an
   orbital with its own images). The original code had 1.75 hardwired here, and the default
   is still 1.75.
+- **Double-zeta p orbitals**: a p shell may now have two Slater exponents, as d and f
+  shells already could. In the parameter table, set `Nzeta = 2` on the p line and give
+  `exp1 exp2 coeff1 coeff2`; the contraction is normalized as for d/f. A contracted
+  inner function plus a diffuse tail gives, for example, interlayer coupling across a van
+  der Waals gap that a single exponent cannot reach. Single-zeta tables give exactly the
+  original results. Only the overlap integrals (bands, DOS, COOP, H/S dumps) use the second
+  exponent; electrostatics, charge iteration and zeta optimization still use the first
+  one, as for double-zeta d. Adapted from the research patch of yaehmop-bandfit
+  (`experimental/carbon_2p_double_zeta.patch`).
 - Fixes: the `.HAM` dump is truncated when it is opened (it used to be appended to); the
   projected DOS uses the right k-point weights (the original curves change slightly).
 

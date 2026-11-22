@@ -329,6 +329,7 @@ typedef struct {
   int ns, np, nd, nf;                  /* principle quantum numbers */
   real coul_s, coul_p, coul_d, coul_f; /* coulomb integrals */
   real exp_s, exp_p, exp_d, exp_f, exp_d2, exp_f2; /* exponents */
+  real exp_p2, coeff_p1, coeff_p2; /* EXPERIMENTAL: contracted double-zeta p */
   real coeff_d1, coeff_d2, coeff_f1,
       coeff_f2; /* coeffs for double zeta functions */
   /* charge iteration parms */
