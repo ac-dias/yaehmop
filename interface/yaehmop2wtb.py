@@ -174,7 +174,7 @@ def read_out(path):
         if m:
             cur = m.group(1).upper(); shells[cur] = dict(shells=[], valence=int(m.group(2)))
             continue
-        m = re.match(r"\s+\d+([SPDF]):", l)
+        m = re.match(r"\s+\d+([SPDF])(?: DZ)?:", l)   # "3P DZ:" for a double-zeta p shell
         if cur and m:
             shells[cur]["shells"].append(m.group(1).lower())
             continue

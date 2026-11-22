@@ -54,7 +54,7 @@ python3 yaehmop2wtb.py path/to/RUN.bind -o wtb_folder [--zero auto|fermi|midgap|
 `RUN.bind` is the input file of the run, with the outputs next to it. The kind of run is
 detected from the files: `.SOC` states in the `.out` mean SOC, and `RUN_up`/`RUN_down` files
 mean spin polarized. The orbitals of each element come from the `.out` (Extended Hückel
-Parameters). The structure, the lattice and the k points come from `RUN.bind`
+Parameters; double-zeta p shells, listed as `3P DZ:`, included). The structure, the lattice and the k points come from `RUN.bind`
 (crystallographic or Cartesian geometry; `*` atoms with parameters given in the input are
 not supported).
 

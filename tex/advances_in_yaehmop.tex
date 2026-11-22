@@ -48,7 +48,7 @@
 \newcommand{\Hsoc}{H_{\mathrm{SOC}}}
 
 \title{\textbf{Advances in YAeHMOP}\\[4pt]
-\Large Spin polarization and spin--orbit coupling in the \texttt{tightbind} program\\[4pt]
+\Large Spin polarization, spin--orbit coupling and double-zeta $p$ orbitals in the \texttt{tightbind} program\\[4pt]
 \large Developer notes for the fork \texttt{ac-dias/yaehmop}}
 \author{Alexandre C. Dias\\(prepared with the help of Claude, Anthropic)}
 \date{November 2026}
@@ -68,10 +68,11 @@ COOP/COHP, Mulliken charges and populations, charge iteration, Walsh diagrams) a
 moments, (iii)~SOC on top of the two spin channels, (iv)~a configurable
 Wolfsberg--Helmholz constant for the diagonal $H_{ii}(\mathbf{k})$ term, which was
 hardwired to $1.75$, (v)~fixes, one of which (the $k$-point weights of the projected DOS)
-changes the projected DOS curves of the original program, and (vi)~support for the new
-outputs in the viewer \texttt{viewkel} (both spin channels in one graph). Apart from the
-projected DOS fix, runs without the new options give byte-identical output to the
-original program. The aim of these notes is to make the
+changes the projected DOS curves of the original program, (vi)~support for the new
+outputs in the viewer \texttt{viewkel} (both spin channels in one graph), and
+(vii)~double-zeta $p$ orbitals (two Slater exponents, as $d$ and $f$ shells already had).
+Apart from the projected DOS fix, runs without the new options, and parameter tables
+without double-zeta $p$ shells, give byte-identical output to the original program. The aim of these notes is to make the
 review of a pull request to \url{https://github.com/greglandrum/yaehmop} easy: each
 change is explained, motivated, shown as code and tied to a test. Section~\ref{sec:inputs}
 summarizes what changed for the user (command line, input keywords, new input and
@@ -129,6 +130,12 @@ A new input keyword for the $K$ of the term that couples an orbital with its own
 the other cells. The original code always used $K=1.75$ for this term
 (\file{K\_hamil.c}), whatever \texttt{THE CONST} said. The default stays $1.75$.
 
+\item[Double-zeta $p$ orbitals]
+A $p$ shell of the parameter table may have two Slater exponents and two coefficients,
+exactly as a $d$ or $f$ shell. A contracted inner function plus a diffuse tail reaches
+neighbors that a single exponent cannot, for example across the van der Waals gap of a
+layered crystal (Section~\ref{sec:pdz}). Single-zeta tables give the original results.
+
 \item[Fixes]
 \texttt{.HAM} is now truncated when it is opened. Before, running twice in the same
 directory appended to the old file. In THIN mode the off-diagonal $H(\mathbf{k})$
@@ -155,8 +162,9 @@ tightbind/walsh.c      & modified & orbital energies and charge-matrix elements 
 tightbind/kpoints.c    & modified & SOC branch in the $k$-point loop; \texttt{O\_TRUNC} for \texttt{.HAM} \\
 tightbind/bands.c      & modified & SOC branch in the band structure ($2n$ bands) \\
 tightbind/K\_hamil.c   & modified & \var{details->the\_const\_diag} instead of the hardwired \var{THE\_CONST} \\
-tightbind/fileio.c     & modified & parsing of \texttt{THE CONST DIAG} \\
-tightbind/bind.h       & modified & new field \var{the\_const\_diag}; new globals; macro \var{VALENCE\_FRACTION} \\
+tightbind/fileio.c     & modified & parsing of \texttt{THE CONST DIAG}; double-zeta $p$ parameters (normalized contraction) \\
+tightbind/mov.c        & modified & overlap integrals of double-zeta $p$ functions (four radial terms) \\
+tightbind/bind.h       & modified & new field \var{the\_const\_diag}; new globals; macro \var{VALENCE\_FRACTION}; fields \var{exp\_p2}, \var{coeff\_p1}, \var{coeff\_p2} of \var{atom\_type} \\
 tightbind/globals.c    & modified & definitions of the new globals \\
 tightbind/prototypes.h & modified & prototypes of \fn{run\_bind\_ex} and of the \file{soc.c} functions \\
 tightbind/mulliken.c   & modified & occupation \var{max\_occup} instead of 2; valence fraction in the net charges \\
@@ -176,8 +184,10 @@ README.md, .gitignore  & modified & short section on the fork; ignore Python cac
 
 In numbers, for the code and tests (\file{tightbind}, \file{viewkel}, \file{tests},
 \file{docs}): about 3\,000 lines added and 80 removed in 34 files; about 960 of the added
-lines are \file{soc.c}, 330 \file{spin.c} and 670 the test script. The core numerical routines (overlaps, $H(R)$,
-Bloch sums, symmetry, properties) are not touched.
+lines are \file{soc.c}, 330 \file{spin.c} and 670 the test script. Of the core numerical
+routines (overlaps, $H(R)$, Bloch sums, symmetry, properties), only the overlap routine
+\fn{mov} changes, for double-zeta $p$ (Section~\ref{sec:pdz}); single-zeta shells follow
+the original code path.
 
 \subsection{Commits on the branch}
 \begin{center}
@@ -186,7 +196,8 @@ Bloch sums, symmetry, properties) are not touched.
 866e130 & spin polarization (one table per channel) and SOC in the tightbinding program; \texttt{.HAM} truncation fix; docs, example and tests \\
 c38236f & configurable $K$ (\texttt{THE CONST DIAG}, \opt{--const-up/--const-down}); \texttt{new\_tests} \\
 722ba73 & remove a \texttt{\_\_pycache\_\_} committed by mistake; \file{.gitignore} \\
-\textrm{(next)} & SOC with all properties, molecules, THIN and Walsh; \opt{--common-fermi} and \texttt{.spin} summary; SOC with two spin tables; projected DOS and COOP fixes; viewkel \\
+742719c & double-zeta $p$ orbitals (\file{bind.h}, \file{fileio.c}, \file{mov.c}, \file{soc.c}) \\
+\textrm{(earlier)} & SOC with all properties, molecules, THIN and Walsh; \opt{--common-fermi} and \texttt{.spin} summary; SOC with two spin tables; projected DOS and COOP fixes; viewkel \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -287,6 +298,11 @@ The format of the parameter tables (\file{eht\_parms.dat}) is unchanged. In a
 spin-polarized run there are two of them, one per channel. They must contain the same
 elements and shells, but any value can differ ($H_{ii}$, zetas, double-zeta
 coefficients).
+
+A $p$ line may now be double zeta, with the same columns as a double-zeta $d$ line:
+\texttt{Nzeta} $=2$, then $H_{ii}$, \texttt{exp1}, \texttt{exp2}, \texttt{coeff1},
+\texttt{coeff2} (Section~\ref{sec:pdz}). The original program reads such a line but uses
+only \texttt{exp1}.
 
 \subsection{New input file: SOC constants}
 
@@ -1017,6 +1033,91 @@ prefers that as the default is a decision for the maintainers. The change is a s
 line in \fn{set\_details\_defaults}.
 
 %=====================================================================
+\section{Double-zeta $p$ orbitals}\label{sec:pdz}
+%=====================================================================
+
+\subsection{Motivation}
+YAeHMOP describes each valence shell by a Slater-type orbital (STO). For $d$ and $f$
+shells the radial part may be a contraction of two STOs; $s$ and $p$ shells had a single
+exponent. With one exponent the tail of a $p$ orbital is tied to its size near the
+nucleus: a value that gives the right bonding inside a layer of a layered material
+(TiS$_2$, MoS$_2$, graphite) gives too little overlap across the van der Waals gap. In
+band fits of 1T-TiS$_2$ slabs with two to five layers, the splitting of the S~$p$ bands of
+the different layers between $\Gamma$ and M, which comes from $pp\pi$ coupling across the
+gap, came out much smaller than in the PBE bands with the single-exponent basis.
+A second, smaller exponent adds a diffuse tail with its own weight and leaves the inner
+part free to fit the bonds inside the layer.
+
+\subsection{Model}
+The radial part of a double-zeta $p$ orbital with principal quantum number $n$ is
+\begin{gather}
+R(r) = N\left[c_1 R_{n}(\zeta_1;r) + c_2 R_{n}(\zeta_2;r)\right],\\
+N = \left(c_1^2 + c_2^2 + 2c_1c_2S_{12}\right)^{-1/2},\qquad
+S_{12} = \left[\frac{4\zeta_1\zeta_2}{(\zeta_1+\zeta_2)^2}\right]^{n+1/2},
+\end{gather}
+where $R_n(\zeta;r)$ are normalized STOs and $S_{12}$ is their overlap on the same center.
+This is the normalization the program already used for $d$ and $f$. The two-center overlap
+of two such orbitals is the sum of four STO overlaps,
+$\langle\chi_A|\chi_B\rangle=\sum_{i,j}N_Ac_{A,i}\,N_Bc_{B,j}\,S(\zeta_{A,i},\zeta_{B,j})$,
+computed for $\sigma$ and $\pi$ components by the existing routine. With $c_2=0$, or with
+$\zeta_2=\zeta_1$, the orbital is the single-zeta one.
+
+\subsection{Implementation}
+\begin{description}[style=nextline,leftmargin=1.2em]
+\item[\file{bind.h}] Three new fields of \var{atom\_type}: \var{exp\_p2}, \var{coeff\_p1},
+  \var{coeff\_p2}.
+\item[\file{fileio.c}, \fn{fill\_atomic\_parms}] For a $p$ line, \var{coeff\_p1}$=1$ and
+  \var{coeff\_p2}$=0$ by default. With \texttt{Nzeta}$=2$ the second exponent and both
+  coefficients are stored and normalized with the formula above; non-positive exponents or
+  zero coefficients stop the program with a message. The atomic-parameter listing of the
+  output shows the double-zeta values (\texttt{3P DZ: ...}).
+\item[\file{mov.c}, \fn{mov}] The number of radial terms of each function is 2 when
+  \var{coeff\_p2}$\neq0$ (as for \var{coeff\_d2}, \var{coeff\_f2}); the coefficient of the
+  first term is \var{coeff\_p1}, and the $\zeta_1\zeta_2$, $\zeta_2\zeta_2$ and
+  $\zeta_2\zeta_1$ terms take \var{exp\_p2}, \var{coeff\_p2} in the same branches as $d$ and
+  $f$:
+\begin{lstlisting}[style=diff]
+-  if( (l1 == 2 && atoms[which1].coeff_d2 != 0) || (l1 == 3 && atoms[which1].coeff_f2 != 0) ) num_zeta1 = 2;
++  if( (l1 == 1 && atoms[which1].coeff_p2 != 0) ||
++      (l1 == 2 && atoms[which1].coeff_d2 != 0) ||
++      (l1 == 3 && atoms[which1].coeff_f2 != 0) ) num_zeta1 = 2;
+...
++    if( l2 == 1){
++      sk2 = atoms[which2].exp_p2;
++      coeff_2 = atoms[which2].coeff_p2;
++    }
+\end{lstlisting}
+\item[\file{soc.c}] The check that the two tables of a SOC run with two spin channels
+  share the basis also compares \var{exp\_p2}, \var{coeff\_p1} and \var{coeff\_p2}.
+\end{description}
+Every quantity built from the overlaps uses the double-zeta functions: $S(\mathbf{k})$,
+$H(\mathbf{k})$ (through the Wolfsberg--Helmholz formula), bands, DOS, COOP/COHP,
+populations, the \texttt{.HAM}/\texttt{.OV} dumps and SOC. As for double-zeta $d$, the
+molecular electrostatics (\file{electrostat.c}), the charge iteration of the exponents
+(\file{muller.c}) and the zeta variation (\file{zetas.c}) still use only the first
+exponent.
+
+\subsection{Tests}
+\begin{center}
+\begin{tabular}{p{9.2cm} r}
+\toprule
+check (3-layer 1T-TiS$_2$ slab, 61 $k$ points on $\Gamma$--M--K--$\Gamma$, 51 orbitals) & max $|\Delta E|$ (eV) \\
+\midrule
+single-zeta table: original \texttt{bind} vs.\ this fork & 0 \\
+S~$p$ double zeta with $\zeta_2=\zeta_1$ ($c_1=0.6$, $c_2=0.4$) vs.\ single zeta & 0 \\
+S~$p$ double zeta with a diffuse tail ($\zeta_2=1.0$, $c_2/c_1=0.28$) vs.\ single zeta & 61 \\
+\bottomrule
+\end{tabular}
+\end{center}
+The first two lines show that single-zeta tables are not affected and that the
+normalization reduces to the single-zeta orbital; the last one shows that the second
+exponent enters the Hamiltonian. \file{tests/spin\_soc/run\_tests.py} passes with
+\opt{--ref-bind} pointing to the original program. The fitting program yaehmop-bandfit
+uses double-zeta $p$ through its \texttt{basis\_dz} option (for example \texttt{S:p}),
+fitting $\zeta_1$, $\zeta_2$ and $c_2/c_1$; it refuses to run if the \texttt{bind} it calls
+ignores the second exponent.
+
+%=====================================================================
 \section{Small fixes}\label{sec:fixes}
 %=====================================================================
 
@@ -1131,7 +1232,12 @@ This section lists every modified file with its changes.
 \item[\file{tightbind/K\_hamil.c}] \var{details->the\_const\_diag} in both builders;
   \var{details->the\_const} in the THIN off-diagonal elements.
 
-\item[\file{tightbind/fileio.c}] Keyword \texttt{THE CONST DIAG}.
+\item[\file{tightbind/fileio.c}] Keyword \texttt{THE CONST DIAG}; double-zeta $p$
+  parameters in \fn{fill\_atomic\_parms} and in the parameter listing
+  (Section~\ref{sec:pdz}).
+
+\item[\file{tightbind/mov.c}] Two-center overlaps of double-zeta $p$ functions
+  (Section~\ref{sec:pdz}).
 
 \item[\file{tightbind/bind.h}] Field \var{the\_const\_diag}; fields \var{orbs\_dn},
   \var{orbsI\_dn}, \var{chg\_spin} of \var{avg\_prop\_info\_type}; \texttt{extern}
@@ -1283,7 +1389,15 @@ $k$ points and band path are read from the input file, and the lattice vectors a
 against the \texttt{.out}. The basis file lists \texttt{index species x y z l m spin}
 in YAeHMOP order. For SOC and SP the orbitals $1..n$ have spin $+1$ and $n+1..2n$ spin
 $-1$, which is the spinor order of \file{soc.c} and of the \texttt{\_up}/\texttt{\_down}
-channels.
+channels. A double-zeta $p$ shell (Section~\ref{sec:pdz}) is listed in the \texttt{.out} as
+\texttt{3P DZ:}; the parser accepts it (before this it skipped the shell and stopped with
+``matrix size 17 but the basis has 11 functions''). The double-zeta radial functions do not
+change the basis file, since the number and the $(l,m)$ of the orbitals are the same, and
+$H(\mathbf{k})$, $S(\mathbf{k})$ come from the dumps of \texttt{bind}. With the S~$p$ shell of
+the MoS$_2$ example made double zeta ($\zeta_1=1.95$, $\zeta_2=0.90$, $c_2/c_1=0.3$),
+\texttt{wtb.x} reproduces the YAeHMOP bands as in the single-zeta validation below: within
+VBM$-6$ to VBM$+4$ eV, $3.9\times10^{-5}$ eV without SOC and $4.7\times10^{-5}$ eV with SOC;
+same gap ($2.0565$ and $1.9568$ eV) and same SOC splitting at K ($0.1690$ eV).
 
 \paragraph{Energy zero.} \texttt{wtb.x} diagonalizes $(H(\mathbf{k})-E_F I,\;S(\mathbf{k}))$.
 With $S\neq I$ this is not a rigid shift of the spectrum. The script therefore writes
@@ -1504,6 +1618,9 @@ needs \texttt{stdbuf -i0}; \file{add\_dos} and \file{sub\_dos} crash in \fn{main
 \item \fn{run\_bind} keeps its signature, and \fn{run\_eht} and the library interface
   are untouched.
 \item The default of \texttt{THE CONST DIAG} reproduces the old $H(\mathbf{k})$.
+\item A table without double-zeta $p$ lines takes the original code path in \fn{mov}
+  (identical bands, Section~\ref{sec:pdz}). A table with them gives different results from
+  the original program, which silently ignored the second $p$ exponent.
 \item New \texttt{.out} lines only appear in spin-polarized or SOC runs (or with
   \texttt{THE CONST DIAG}). They start with \texttt{\#} or \texttt{;}, like the existing
   ones.
@@ -1538,6 +1655,8 @@ The changes are independent enough to be reviewed in three steps:
   \file{walsh.c}, \opt{--soc} (with the two-table variant), the tests and examples.
 \item \textbf{viewkel}, separately: the three old defects and the spin-polarized graphs
   (Section~\ref{sec:viewkel}).
+\item \textbf{Double-zeta $p$}: \file{bind.h}, \file{fileio.c}, \file{mov.c} (and the
+  \file{soc.c} check if SOC is merged). Small and independent of the rest.
 \item The interface to WanTiBEXOS (\file{interface/}) is a separate Python tool. It can go
   with the SOC step or stay in the fork.
 \end{enumerate}
@@ -1552,6 +1671,8 @@ The changes are independent enough to be reviewed in three steps:
 \item viewkel: the remaining old defects listed in Section~\ref{sec:viewkel}.
 \item yaehmop-bandfit: use the new \texttt{bind} directly (spinor \texttt{.HAM}, the
   \texttt{\_up}/\texttt{\_down} outputs and \texttt{.spin}).
+\item Double-zeta $p$ in the electrostatics, charge iteration and zeta variation (as for
+  double-zeta $d$, only the first exponent is used there); double-zeta $s$.
 \item The legacy makefiles other than \file{Makefile} and \file{makefile.linux}.
 \end{itemize}
 
