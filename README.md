@@ -47,6 +47,11 @@ New features:
   (`experimental/carbon_2p_double_zeta.patch`). **Pending:** the post-processing routines
   (`.MO` file for viewkel, netCDF, electrostatics, charge iteration, zeta variation) and
   viewkel's orbital plots still use only the first p exponent.
+- **Structure converter** `interface/kel_crystal_conversion.py`: reads the crystal structure of VASP
+  (POSCAR/CONTCAR), FHI-aims (geometry.in), SIESTA (.fdf, .XV, .STRUCT_OUT), DFTB+ (.gen, dftb_in.hsd)
+  or Quantum ESPRESSO (pw.x input) and writes a periodic YAeHMOP input (`Geometry Crystallographic`,
+  `Lattice`, `Crystal Spec`; optional `THE CONST`, `Electrons`, `Band`, `K points`). The periodic
+  dimension is detected from the vacuum and slabs wrapped across the vacuum are made contiguous.
 - Fixes: the `.HAM` dump is truncated when it is opened (it used to be appended to); the
   projected DOS uses the right k-point weights (the original curves change slightly).
 
@@ -58,6 +63,7 @@ Build with LAPACK (`cmake ../tightbind -DUSE_BLAS_LAPACK=ON`); SOC needs it.
 | [docs/SPIN_SOC.md](docs/SPIN_SOC.md) | user guide: options, file formats, limitations |
 | [new_tests/](new_tests/) | band structures of a MoS2 monolayer with SOC and of bcc Fe with one table per spin channel: inputs, outputs, figures, README |
 | [interface/](interface/) | `yaehmop2wtb.py`: converts the exported H and S (spinless, SOC or spin polarized) to the [WanTiBEXOS](https://github.com/ac-dias/wantibexos) tight-binding format; MoS2 example validated with `wtb.x` |
+| [interface/kel_crystal_conversion.py](interface/kel_crystal_conversion.py) | crystal structure of VASP, FHI-aims, SIESTA, DFTB+ or Quantum ESPRESSO → periodic YAeHMOP input (`kel_crystal_conversion.py --format VASP --in POSCAR`; `--help` for all options); single file, standard library only |
 | [examples/spin_soc/](examples/spin_soc/) | small diamond example |
 | [tests/spin_soc/run_tests.py](tests/spin_soc/run_tests.py) | automated tests (`python3 tests/spin_soc/run_tests.py --bind build/bind`) |
 

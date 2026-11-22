@@ -1464,6 +1464,42 @@ point), relative to the VBM.}
 
 
 %=====================================================================
+\subsection{Structure converter: \file{kel\_crystal\_conversion.py}}\label{sec:kelconv}
+\file{interface/kel\_crystal\_conversion.py} (one file, Python standard library only) writes a periodic
+YAeHMOP input from the crystal structure of another code:
+\begin{lstlisting}[style=sh]
+python3 interface/kel_crystal_conversion.py --format VASP --in POSCAR      # -> POSCAR.bind
+python3 interface/kel_crystal_conversion.py --format QE --in scf.in --band "G 0 0 0, M 0.5 0 0, G 0 0 0"
+python3 interface/kel_crystal_conversion.py --help
+\end{lstlisting}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{l >{\raggedright\arraybackslash}X}
+\toprule
+\texttt{--format} & files read \\
+\midrule
+VASP & POSCAR/CONTCAR: VASP 5 species line (VASP 4 with \opt{--species}), Direct or Cartesian, negative scale = volume, Selective dynamics \\
+AIMS & \file{geometry.in}: \texttt{lattice\_vector}, \texttt{atom}, \texttt{atom\_frac} \\
+SIESTA & \file{.fdf} (\texttt{LatticeConstant}, \texttt{LatticeVectors} or \texttt{LatticeParameters}, \texttt{AtomicCoordinatesFormat}, \texttt{ChemicalSpeciesLabel}, \texttt{\%include}), \file{.XV}, \file{.STRUCT\_OUT} \\
+DFTB & \file{.gen} (types S and F) or \file{dftb\_in.hsd} with \texttt{Geometry = GenFormat \{\ldots\}} (inline or \texttt{<<<}) \\
+QE & pw.x input: \texttt{ibrav = 0} with \texttt{CELL\_PARAMETERS} (alat, bohr, angstrom) or \texttt{ibrav} 1, 2, 3, 4, 6, 8; \texttt{ATOMIC\_POSITIONS} alat, bohr, angstrom, crystal \\
+\bottomrule
+\end{tabularx}
+\end{center}
+The output has the layout of the other examples of this document: \texttt{Geometry Crystallographic}
+with fractional coordinates, one helper atom per periodic direction (atom~1 shifted by $\mathbf{a}$,
+$\mathbf{b}$, $\mathbf{c}$) to define the lattice vectors, \texttt{Lattice} (dimension, overlap images,
+vector definitions) and \texttt{Crystal Spec}; \opt{--const}, \opt{--electrons}, \opt{--charge},
+\opt{--band}/\opt{--band-points}, \opt{--kmesh} (Gamma-centred \texttt{K points}) and
+\opt{--average-properties} add the corresponding blocks. The periodic dimension is detected from the
+vacuum (\opt{--vacuum}, default 6~\AA; \opt{--dimension} forces it) and the non-periodic directions are
+moved to the end by a cyclic permutation, since \texttt{Lattice 2} uses $\mathbf{a}$ and $\mathbf{b}$.
+Along the non-periodic directions the atoms are made contiguous: a DFT code is periodic in 3D, so an atom
+of a slab may be stored at $z=0.999$ instead of $-0.001$, and in a 2D YAeHMOP run it would be isolated
+from its layer (\opt{--no-contiguous} keeps the file as it is). Test: a 4L TiTe$_2$ slab with one Te
+wrapped across the vacuum, anatase TiO$_2$ and rutile TiS$_2$, each written in the twelve file variants
+above; the YAeHMOP bands of all converted inputs agree with each other to the $10^{-5}$~eV printed in the
+\texttt{.band} file.
+
 \section{The viewer: \texttt{viewkel}}\label{sec:viewkel}
 %=====================================================================
 

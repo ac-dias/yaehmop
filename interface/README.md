@@ -1,4 +1,29 @@
-# interface: YAeHMOP H and S → WanTiBEXOS
+# interface: YAeHMOP H and S → WanTiBEXOS, and DFT structures → YAeHMOP
+
+**Structure converter.** `kel_crystal_conversion.py` writes a periodic YAeHMOP input from the crystal
+structure of another code (one file, Python standard library only):
+
+```bash
+python3 kel_crystal_conversion.py --format VASP   --in POSCAR             # -> POSCAR.bind
+python3 kel_crystal_conversion.py --format AIMS   --in geometry.in --out MoS2.bind
+python3 kel_crystal_conversion.py --format SIESTA --in MoS2.fdf            # also .XV, .STRUCT_OUT
+python3 kel_crystal_conversion.py --format DFTB   --in geo_end.gen         # or dftb_in.hsd
+python3 kel_crystal_conversion.py --format QE     --in scf.in --band "G 0 0 0, M 0.5 0 0, K 1/3 1/3 0, G 0 0 0" \
+        --band-points 40 --kmesh 11 11 1 --average-properties --const 1.75
+python3 kel_crystal_conversion.py --help                                   # every option
+```
+
+The periodic dimension comes from the vacuum (an empty slab of 6 Å or more across a lattice direction;
+`--dimension` forces it); non-periodic directions are moved to the end, and atoms wrapped across the
+vacuum are brought back next to their slab, since YAeHMOP has no images along those directions.
+Checked on a 4L TiTe2 slab (with one Te wrapped across the vacuum), anatase TiO2 and rutile TiS2: the
+YAeHMOP bands of the inputs converted from VASP (direct and Cartesian), FHI-aims (atom and atom_frac),
+DFTB+ (.gen, inline hsd), QE (crystal and angstrom) and SIESTA (.fdf Ang and Fractional, .XV,
+.STRUCT_OUT) agree with each other to the 1e-5 eV printed in the .band file.
+
+---
+
+# YAeHMOP H and S → WanTiBEXOS
 
 `yaehmop2wtb.py` reads the Hamiltonian and overlap written by YAeHMOP (this fork, `yaehmop-dev`)
 and writes them in the non-orthogonal tight-binding format of
