@@ -810,18 +810,20 @@ void run_bind_ex(char *file_name, char *out_name, bool use_stdin_stdout,
 
   /* spin channel: Fermi level, electrons and charges to the parent (spin.c) */
   spin_send_summary(unit_cell,details,&properties);
-  cleanup_memory();
 
-  fprintf(status_file,"Done!\n");
-  fprintf(stdout,"Done!\n");
-
-  /* close the files and exit */
+  /* close the netCDF file before cleanup_memory() frees details */
   #ifdef INCLUDE_NETCDF_SUPPORT
   if( details->do_netCDF ){
     netCDF_close_file(details);
   }
   #endif
 
+  cleanup_memory();
+
+  fprintf(status_file,"Done!\n");
+  fprintf(stdout,"Done!\n");
+
+  /* close the files and exit */
     if (!use_stdin_stdout) {
       fclose(status_file);
       fclose(output_file);

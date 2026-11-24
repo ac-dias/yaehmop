@@ -1305,7 +1305,7 @@ void print_MOs(detail_type *details,int num_orbs,eigenset_type eigenset,int kpoi
     /* write the atomic parms */
     fprintf(MO_file,"#begin_parms\n");
     for(i=0;i<num_unique_atoms;i++){
-      fprintf(MO_file,"%s %d %lf %lf %d %lf %lf %d %lf %lf %lf %lf %lf %d %lf %lf %lf %lf %lf\n",
+      fprintf(MO_file,"%s %d %lf %lf %d %lf %lf %d %lf %lf %lf %lf %lf %d %lf %lf %lf %lf %lf",
               unique_atoms[i].symb,
               unique_atoms[i].ns,unique_atoms[i].exp_s,unique_atoms[i].coul_s,
               unique_atoms[i].np,unique_atoms[i].exp_p,unique_atoms[i].coul_p,
@@ -1313,6 +1313,12 @@ void print_MOs(detail_type *details,int num_orbs,eigenset_type eigenset,int kpoi
               unique_atoms[i].coeff_d1,unique_atoms[i].exp_d2,unique_atoms[i].coeff_d2,
               unique_atoms[i].nf,unique_atoms[i].exp_f,unique_atoms[i].coul_f,
               unique_atoms[i].coeff_f1,unique_atoms[i].exp_f2,unique_atoms[i].coeff_f2);
+      /* double-zeta p: coeff1 exp2 coeff2 appended (same order as d and f), only
+         when present, so single-zeta files are unchanged and old readers ignore it */
+      if( unique_atoms[i].np && unique_atoms[i].coeff_p2 != 0 )
+        fprintf(MO_file," %lf %lf %lf",unique_atoms[i].coeff_p1,
+                unique_atoms[i].exp_p2,unique_atoms[i].coeff_p2);
+      fprintf(MO_file,"\n");
     }
     fprintf(MO_file,"#end_parms\n");
 

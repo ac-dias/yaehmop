@@ -272,6 +272,8 @@ int read_MO_surface(FILE *infile,MO_surface_type *surf)
   float contraction;
   float exps,expp,expd1,expd2,expf1,expf2;
   float c_d1,c_d2,c_f1,c_f2;
+  float expp2,c_p1,c_p2;
+  int num_read;
   float Hs,Hp,Hd,Hf;
 
   int color;
@@ -349,12 +351,20 @@ int read_MO_surface(FILE *infile,MO_surface_type *surf)
 
   /* read out the unique centers */
   while(!strstr(instring,"#END_PARMS")){
-    sscanf(instring,"%s %d %lf %lf %d %lf %lf %d %lf %lf %lf %lf %lf %d %lf %lf %lf %lf %lf",type,&ns,&exps,&Hs,&np,&expp,&Hp,&nd,&expd1,&Hd,&c_d1,&expd2,&c_d2,&nf,&expf1,&Hf,&c_f1,&expf2,&c_f2);
+    num_read = sscanf(instring,"%s %d %lf %lf %d %lf %lf %d %lf %lf %lf %lf %lf %d %lf %lf %lf %lf %lf %lf %lf %lf",type,&ns,&exps,&Hs,&np,&expp,&Hp,&nd,&expd1,&Hd,&c_d1,&expd2,&c_d2,&nf,&expf1,&Hf,&c_f1,&expf2,&c_f2,&c_p1,&expp2,&c_p2);
+    /* double-zeta p (coeff1 exp2 coeff2 at the end of the line) only in .MO files
+       written by a bind with double-zeta p; otherwise a single exponent */
+    if( num_read < 22 || c_p2 == 0.0 ){
+      expp2 = 0;
+      c_p1 = 0;
+      c_p2 = 0;
+    }
 
     color++;
     /* contract the orbitals */
     exps *= contraction;
     expp *= contraction;
+    expp2 *= contraction;
     expd1 *= contraction;
     expd2 *= contraction;
     expf1 *= contraction;
@@ -449,9 +459,9 @@ int read_MO_surface(FILE *infile,MO_surface_type *surf)
           AO->rad_func = eval_7_rad; break;
         }
         AO->zeta1 = expp;
-        AO->zeta2 = 0;
-        AO->C1 = 0;
-        AO->C2 = 0;
+        AO->zeta2 = expp2;
+        AO->C1 = c_p1;
+        AO->C2 = c_p2;
 
         if( j == unique_center->num_AOs ){
           /* do the lookup_table */
@@ -647,9 +657,9 @@ int read_MO_surface(FILE *infile,MO_surface_type *surf)
           for( j=center[i].num_AOs; j<center[i].num_AOs+3; j++ ){
             AO = &(center[i].AO_list[j]);
             AO->zeta1 = expp;
-            AO->zeta2 = 0;
-            AO->C1 = 0;
-            AO->C2 = 0;
+            AO->zeta2 = expp2;
+            AO->C1 = c_p1;
+            AO->C2 = c_p2;
             AO->rad_lookup_tbl =
               unique_center->AO_list[j].rad_lookup_tbl;
           }

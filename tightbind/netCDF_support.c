@@ -41,11 +41,20 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifdef INCLUDE_NETCDF_SUPPORT
 
-/* the max number of parameters */
-#define PARAM_LEN 20
+/* the max number of parameters (20-22: double-zeta p, zero for a single-zeta p) */
+#define PARAM_LEN 23
 
 #define TRY_CDF(__fcall__)\
 {int errval; errval=__fcall__;netCDF_handle_error(errval);}
+
+/* the start/count arrays of nc_put_var*() are size_t: copy the int index
+   arrays used below (a cast of int* to size_t* reads garbage on 64-bit) */
+static size_t *int_to_size_t(int *in,size_t *out)
+{
+  int i;
+  for(i=0;i<10;i++) out[i] = (size_t)in[i];
+  return out;
+}
 
 void netCDF_handle_error(int status)
 {
@@ -78,7 +87,8 @@ void netCDF_init_file(detail_type *details,cell_type *cell,int num_orbs,
   int i,j,itab,jtab;
   char outname[240];
   int fileid;
-  int dim_array[10],count_array[10];
+  int dim_array[10]={0},count_array[10]={0};
+  size_t start_buf[10],count_buf[10];
   int symb_var_ID,pos_var_ID,param_var_ID;
   int kpoints_ID,kpoint_weights_ID,num_electrons_ID;
   int lattice_ID;
@@ -91,7 +101,7 @@ void netCDF_init_file(detail_type *details,cell_type *cell,int num_orbs,
   details->netCDF_info = (netCDF_info_type *)my_calloc(1,sizeof(netCDF_info_type));
 
   if( details->walsh_details.num_steps > 1){
-    sprintf(outname,"%s.step%d.nCDF",walsh_step,details->filename);
+    sprintf(outname,"%s.step%d.nCDF",details->filename,walsh_step);
   }
   else{
     sprintf(outname,"%s.nCDF",details->filename);
@@ -187,7 +197,7 @@ void netCDF_init_file(detail_type *details,cell_type *cell,int num_orbs,
     count_array[0] = 1;
     count_array[1] = ATOM_SYMB_LEN;
     TRY_CDF(nc_put_vara_text(details->netCDF_info->file_ID,symb_var_ID,
-                             (size_t *)dim_array,(size_t *)count_array,
+                             int_to_size_t(dim_array,start_buf),int_to_size_t(count_array,count_buf),
                              cell->atoms[i].symb));
 
     /* then the position */
@@ -199,7 +209,7 @@ void netCDF_init_file(detail_type *details,cell_type *cell,int num_orbs,
     count_array[0] = 1;
     count_array[1] = 3;
     TRY_CDF(nc_put_vara_double(details->netCDF_info->file_ID,pos_var_ID,
-                               (size_t *)dim_array,(size_t *)count_array,
+                               int_to_size_t(dim_array,start_buf),int_to_size_t(count_array,count_buf),
                                (double *)temp_vect));
 
     /* build an array of the parameters */
@@ -215,7 +225,7 @@ void netCDF_init_file(detail_type *details,cell_type *cell,int num_orbs,
     temp_vect[9] = (double)cell->atoms[i].coul_d;
     temp_vect[10] = (double)cell->atoms[i].exp_d;
     temp_vect[11] = (double)cell->atoms[i].coeff_d1;
-    temp_vect[10] = (double)cell->atoms[i].exp_d2;
+    temp_vect[12] = (double)cell->atoms[i].exp_d2;
     temp_vect[13] = (double)cell->atoms[i].coeff_d2;
     temp_vect[14] = (double)cell->atoms[i].nf;
     temp_vect[15] = (double)cell->atoms[i].coul_f;
@@ -223,6 +233,9 @@ void netCDF_init_file(detail_type *details,cell_type *cell,int num_orbs,
     temp_vect[17] = (double)cell->atoms[i].coeff_f1;
     temp_vect[18] = (double)cell->atoms[i].exp_f2;
     temp_vect[19] = (double)cell->atoms[i].coeff_f2;
+    temp_vect[20] = (double)cell->atoms[i].coeff_p1;
+    temp_vect[21] = (double)cell->atoms[i].exp_p2;
+    temp_vect[22] = (double)cell->atoms[i].coeff_p2;
 
     /* then write them */
     dim_array[0] = i;
@@ -230,7 +243,7 @@ void netCDF_init_file(detail_type *details,cell_type *cell,int num_orbs,
     count_array[0] = 1;
     count_array[1] = PARAM_LEN;
     TRY_CDF(nc_put_vara_double(details->netCDF_info->file_ID,param_var_ID,
-                               (size_t *)dim_array,(size_t *)count_array,
+                               int_to_size_t(dim_array,start_buf),int_to_size_t(count_array,count_buf),
                                (double *)temp_vect));
   }
 
@@ -247,7 +260,7 @@ void netCDF_init_file(detail_type *details,cell_type *cell,int num_orbs,
     count_array[0] = 1;
     count_array[1] = 3;
     TRY_CDF(nc_put_vara_double(details->netCDF_info->file_ID,lattice_ID,
-                               (size_t *)dim_array,(size_t *)count_array,
+                               int_to_size_t(dim_array,start_buf),int_to_size_t(count_array,count_buf),
                                (double *)temp_vect));
   }
 
@@ -261,14 +274,14 @@ void netCDF_init_file(detail_type *details,cell_type *cell,int num_orbs,
     count_array[0] = 1;
     count_array[1] = 3;
     TRY_CDF(nc_put_vara_double(details->netCDF_info->file_ID,kpoints_ID,
-                               (size_t *)dim_array,(size_t *)count_array,
+                               int_to_size_t(dim_array,start_buf),int_to_size_t(count_array,count_buf),
                                (double *)temp_vect));
     count_array[0] = i;
     if( cell->dim > 0 ) temp_vect[0] = details->K_POINTS[i].weight;
     else temp_vect[0] = 1;
     TRY_CDF(nc_put_var1_double(details->netCDF_info->file_ID,
                                kpoint_weights_ID,
-                               (size_t *)count_array,(double *)temp_vect));
+                               int_to_size_t(count_array,count_buf),(double *)temp_vect));
   }
 
   TRY_CDF(nc_put_var1_double(details->netCDF_info->file_ID,
@@ -297,7 +310,8 @@ void netCDF_write_MOs(detail_type *details,int num_orbs,
 {
   int orbR_ID;
   int orbI_ID;
-  int dim_array[10],count_array[10];
+  int dim_array[10]={0},count_array[10]={0};
+  size_t start_buf[10],count_buf[10];
   size_t cell_dim;
 
   /* read out the dimension */
@@ -335,11 +349,11 @@ void netCDF_write_MOs(detail_type *details,int num_orbs,
   count_array[1] = num_orbs;
   count_array[2] = num_orbs;
   TRY_CDF(nc_put_vara_float(details->netCDF_info->file_ID,orbR_ID,
-                             (size_t *)dim_array,(size_t *)count_array,
+                             int_to_size_t(dim_array,start_buf),int_to_size_t(count_array,count_buf),
                              (float *)prop_info->orbs));
   if( cell_dim > 0 ){
     TRY_CDF(nc_put_vara_float(details->netCDF_info->file_ID,orbI_ID,
-                              (size_t *)dim_array,(size_t *)count_array,
+                              int_to_size_t(dim_array,start_buf),int_to_size_t(count_array,count_buf),
                               (float *)prop_info->orbsI));
   }
 
@@ -362,7 +376,8 @@ void netCDF_write_Es(detail_type *details,int num_orbs,
                      avg_prop_info_type *prop_info)
 {
   int E_var_ID;
-  int dim_array[10],count_array[10];
+  int dim_array[10]={0},count_array[10]={0};
+  size_t start_buf[10],count_buf[10];
 
   TRY_CDF(nc_redef(details->netCDF_info->file_ID));
   dim_array[0] = details->netCDF_info->num_KPOINTS_ID;
@@ -378,7 +393,7 @@ void netCDF_write_Es(detail_type *details,int num_orbs,
   count_array[0] = details->num_KPOINTS;
   count_array[1] = num_orbs;
   TRY_CDF(nc_put_vara_float(details->netCDF_info->file_ID,E_var_ID,
-                             (size_t *)dim_array,(size_t *)count_array,
+                             int_to_size_t(dim_array,start_buf),int_to_size_t(count_array,count_buf),
                              (float *)prop_info->energies));
 
 }
@@ -401,7 +416,8 @@ void netCDF_close_file(detail_type *details)
   if( !details->do_netCDF )
     FATAL_BUG("close_netCDF called without CDF writing on.");
 
-  if( details->netCDF_info->file_ID ){
+  /* no file when it was never opened (no average properties block) */
+  if( details->netCDF_info && details->netCDF_info->file_ID ){
    TRY_CDF(nc_close(details->netCDF_info->file_ID));
   }
 }

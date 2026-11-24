@@ -41,12 +41,17 @@ New features:
   `exp1 exp2 coeff1 coeff2`; the contraction is normalized as for d/f. A contracted
   inner function plus a diffuse tail gives, for example, interlayer coupling across a van
   der Waals gap that a single exponent cannot reach. Single-zeta tables give exactly the
-  original results. Only the overlap integrals (bands, DOS, COOP, H/S dumps) use the second
-  exponent; electrostatics, charge iteration and zeta optimization still use the first
-  one, as for double-zeta d. Adapted from the research patch of yaehmop-bandfit
-  (`experimental/carbon_2p_double_zeta.patch`). **Pending:** the post-processing routines
-  (`.MO` file for viewkel, netCDF, electrostatics, charge iteration, zeta variation) and
-  viewkel's orbital plots still use only the first p exponent.
+  original results. The overlap integrals (bands, DOS, COOP, H/S dumps) use the contracted
+  function, and so do the post-processing routines: the molecular electrostatic energy
+  (exact potential of the contracted density), the zeta variation (both exponents
+  shifted, contraction renormalized), the `.MO` file (three extra fields on a double-zeta
+  p line) with viewkel's MO surfaces and contours, and the netCDF output. The Muller
+  iteration uses its own single-zeta p, as it already did for d, and says so in the
+  output. The netCDF writer also got four old fixes (wrong parameter index, int indices
+  passed as `size_t*`, file closed after the memory was freed, swapped `sprintf`
+  arguments in the Walsh-step file name). Double-zeta s is not
+  supported. Adapted from the research patch of yaehmop-bandfit
+  (`experimental/carbon_2p_double_zeta.patch`).
 - **Structure converter** `interface/kel_crystal_conversion.py`: reads the crystal structure of VASP
   (POSCAR/CONTCAR), FHI-aims (geometry.in), SIESTA (.fdf, .XV, .STRUCT_OUT), DFTB+ (.gen, dftb_in.hsd)
   or Quantum ESPRESSO (pw.x input) and writes a periodic YAeHMOP input (`Geometry Crystallographic`,

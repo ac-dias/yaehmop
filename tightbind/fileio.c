@@ -1335,6 +1335,8 @@ void parse_muller_parms(FILE *infile,detail_type *details,cell_type *cell)
         atom2->coul_d = atom->coul_d;atom2->exp_d = atom->exp_d;
         atom2->coeff_d1 = atom->coeff_d1;atom2->coeff_d2 = atom->coeff_d2;
         atom2->exp_d2 = atom->exp_d2;
+        atom2->coeff_p1 = atom->coeff_p1;atom2->coeff_p2 = atom->coeff_p2;
+        atom2->exp_p2 = atom->exp_p2;
       }
     }else{
       fatal("Atom numbers not specified in muller parms section.");

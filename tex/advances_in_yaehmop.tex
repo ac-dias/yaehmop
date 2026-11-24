@@ -155,14 +155,14 @@ total DOS. The COOP curves of a spin channel had the factor 2 of doubly occupied
 tightbind/soc.c        & new      & the whole SOC implementation (reading $\lambda$, $\mathbf{L}$ matrices, spinor matrices, diagonalization with eigenvectors, dumps, per-$k$ properties, storage for the average properties, spin moments, second spin table) \\
 tightbind/spin.c       & new      & spin-polarized runs: pipes between the channel processes and the parent, common Fermi level, \texttt{.spin} summary \\
 tightbind/main.c       & modified & new command-line parser; one process per spin channel, with pipes; SOC with two tables \\
-tightbind/driver.c     & modified & \fn{run\_bind\_ex} (input name $\neq$ output name); channel set-up; calls to the SOC and spin code \\
+tightbind/driver.c     & modified & \fn{run\_bind\_ex} (input name $\neq$ output name); channel set-up; calls to the SOC and spin code; netCDF file closed before \fn{cleanup\_memory} \\
 tightbind/memory.c     & modified & average-properties arrays sized for $2n$ spinor states with SOC \\
 tightbind/COOP\_stuff.c & modified & COOP of a spinor state = sum over its spin parts; $2n$ states; curve scaled to the electrons per state \\
 tightbind/walsh.c      & modified & orbital energies and charge-matrix elements of spinor states \\
 tightbind/kpoints.c    & modified & SOC branch in the $k$-point loop; \texttt{O\_TRUNC} for \texttt{.HAM} \\
 tightbind/bands.c      & modified & SOC branch in the band structure ($2n$ bands) \\
 tightbind/K\_hamil.c   & modified & \var{details->the\_const\_diag} instead of the hardwired \var{THE\_CONST} \\
-tightbind/fileio.c     & modified & parsing of \texttt{THE CONST DIAG}; double-zeta $p$ parameters (normalized contraction) \\
+tightbind/fileio.c     & modified & parsing of \texttt{THE CONST DIAG}; double-zeta $p$ parameters (normalized contraction); Muller parameters copied with the double-zeta $p$ fields \\
 tightbind/mov.c        & modified & overlap integrals of double-zeta $p$ functions (four radial terms) \\
 tightbind/bind.h       & modified & new field \var{the\_const\_diag}; new globals; macro \var{VALENCE\_FRACTION}; fields \var{exp\_p2}, \var{coeff\_p1}, \var{coeff\_p2} of \var{atom\_type} \\
 tightbind/globals.c    & modified & definitions of the new globals \\
@@ -170,9 +170,12 @@ tightbind/prototypes.h & modified & prototypes of \fn{run\_bind\_ex} and of the 
 tightbind/mulliken.c   & modified & occupation \var{max\_occup} instead of 2; valence fraction in the net charges \\
 tightbind/avg\_props.c & modified & same, for the crystal occupations and average net charges; $2n$ states and spin sum in the average overlap populations \\
 tightbind/DOS\_stuff.c & modified & ``states are present'' counts use \var{max\_occup}; $2n$ states; fix of the $k$ weights of the projected DOS \\
-tightbind/genutil.c    & modified & electron-count sanity check uses \var{max\_occup} \\
+tightbind/genutil.c    & modified & electron-count sanity check uses \var{max\_occup}; double-zeta $p$ in the \texttt{.MO} file \\
+tightbind/electrostat.c, tightbind/muller.c, tightbind/zetas.c & modified & double-zeta $p$ in the molecular electrostatics, the Muller iteration and the zeta variation (Section~\ref{sec:pdzpost}) \\
+tightbind/netCDF\_support.c & modified & double-zeta $p$ in the atomic parameters; old defects fixed (Section~\ref{sec:pdzpost}) \\
 tightbind/CMakeLists.txt,\newline tightbind/Makefile,\newline tightbind/makefile.linux & modified & \file{soc.c}, \file{spin.c} added to the sources \\
 viewkel/band\_graphs.c,\newline viewkel/prop\_graphs.c,\newline viewkel/genutil.c, viewkel/interface.c,\newline viewkel/graph\_objects.h, viewkel/prototypes.h & modified & both spin channels in one band or property graph; Fermi level from the \texttt{.spin} summary (Section~\ref{sec:viewkel}) \\
+viewkel/fit\_orbs.c & modified & reads the double-zeta $p$ of the \texttt{.MO} file for MO surfaces and contours \\
 viewkel/buttons.c,\newline viewkel/hierarchy.c & modified & old defects: text mode (\texttt{-t}) crashed creating X button windows and at exit; freeing a property graph without integration crashed \\
 docs/SPIN\_SOC.md      & new      & user documentation of the new options \\
 tests/spin\_soc/       & new      & automated tests (\file{run\_tests.py}) and their data \\
@@ -1092,11 +1095,8 @@ $\zeta_2=\zeta_1$, the orbital is the single-zeta one.
 \end{description}
 Every quantity built from the overlaps uses the double-zeta functions: $S(\mathbf{k})$,
 $H(\mathbf{k})$ (through the Wolfsberg--Helmholz formula), bands, DOS, COOP/COHP,
-populations, the \texttt{.HAM}/\texttt{.OV} dumps and SOC. As for double-zeta $d$, the
-molecular electrostatics (\file{electrostat.c}), the charge iteration of the exponents
-(\file{muller.c}), the zeta variation (\file{zetas.c}), the \texttt{.MO} file for viewkel
-and the netCDF output still use only the first exponent, and viewkel draws only the inner
-function; updating them is pending (Section~\ref{sec:todo}).
+populations, the \texttt{.HAM}/\texttt{.OV} dumps and SOC. The post-processing routines that
+read the exponents directly also know the second one (Section~\ref{sec:pdzpost}).
 
 \subsection{Tests}
 \begin{center}
@@ -1117,6 +1117,63 @@ exponent enters the Hamiltonian. \file{tests/spin\_soc/run\_tests.py} passes wit
 uses double-zeta $p$ through its \texttt{basis\_dz} option (for example \texttt{S:p}),
 fitting $\zeta_1$, $\zeta_2$ and $c_2/c_1$; it refuses to run if the \texttt{bind} it calls
 ignores the second exponent.
+
+\subsection{Post-processing and viewkel}\label{sec:pdzpost}
+\begin{description}[style=nextline,leftmargin=1.2em]
+\item[\file{electrostat.c}] The molecular electrostatic energy (keyword
+  \texttt{Electrostat}) needs the potential of the charge cloud of each shell. The density of
+  a contracted shell is
+  $|c_1\chi(\zeta_1)+c_2\chi(\zeta_2)|^2 = c_1^2\rho(\zeta_1)+c_2^2\rho(\zeta_2)
+  +2c_1c_2S_{12}\,\rho\big(\tfrac{\zeta_1+\zeta_2}{2}\big)$, with $\rho(\zeta)$ the normalized
+  density of one exponent (radial part $r^{2n-2}e^{-2\zeta r}$) and $S_{12}$ the overlap of
+  the normalization; the weights add up to 1. The original screened-potential expression
+  moved to the helper \fn{sto\_shell\_term}, and \fn{p\_shell\_term} sums the three terms
+  (single zeta: the original expression).
+\item[\file{muller.c}, \file{fileio.c}] The Muller iteration replaces the table parameters
+  by its own single-zeta functions of the occupations, as it already did for $d$
+  (\var{exp\_d2}$=0$): \fn{calc\_muller\_init\_parms} sets \var{coeff\_p2}$=0$ and writes a
+  line to the output when the table had a double-zeta $p$. The copy of the Muller parameters
+  to the other atoms of the same set includes the $p$ fields.
+\item[\file{zetas.c}] The zeta variation (keyword \texttt{Zeta}) shifts both exponents of a
+  double-zeta $p$ by the amount the original code adds to $\zeta_p$ and renormalizes the
+  contraction for the new $S_{12}$, keeping $c_1/c_2$ (\fn{renormalize\_p\_contraction}).
+\item[\file{genutil.c}] The \texttt{\#begin\_parms} block of the \texttt{.MO} file gets three
+  more fields at the end of a line with double-zeta $p$: $c_1$, $\zeta_2$, $c_2$ (the order
+  of $d$ and $f$). Single-zeta lines are unchanged, and an old viewkel ignores the extra
+  fields.
+\item[\file{viewkel/fit\_orbs.c}] \fn{read\_MO\_surface} reads 19 or 22 fields and passes
+  $\zeta_2$, $c_1$, $c_2$ to the $p$ functions of the unique centers and of every center,
+  so isosurfaces and contours use the contracted function (\fn{eval\_n\_rad} already handled
+  two exponents for $d$).
+\item[\file{netCDF\_support.c}] The atomic-parameter array has 23 entries; 20--22 are
+  \var{coeff\_p1}, \var{exp\_p2}, \var{coeff\_p2}. To test it, four old defects of the
+  netCDF path were fixed: entry 10 was overwritten with \var{exp\_d2} and entry 12 never
+  written; the start/count arrays of \fn{nc\_put\_vara\_*} were \texttt{int} arrays cast to
+  \texttt{size\_t*} (garbage indices on 64-bit, so every netCDF run stopped with ``Index
+  exceeds dimension bound''); \fn{run\_bind\_ex} closed the file after
+  \fn{cleanup\_memory} had freed \var{details} (crash at the end of every run), and the
+  close now also tolerates a run that never opened the file. The name of the file of a
+  Walsh step had its \texttt{sprintf} arguments swapped.
+\end{description}
+Tests (CO$_2$ molecule, C and O with single-zeta $s$ and double-zeta $p$, against the
+fork before this change):
+\begin{center}
+\begin{tabular}{p{9.6cm} p{3.6cm}}
+\toprule
+check & result \\
+\midrule
+single-zeta table: \texttt{.out} (electrostatics, zeta variation, Muller) and \texttt{.MO} & identical files \\
+double zeta with $\zeta_2=\zeta_1$ vs.\ single zeta: electrostatic energy; zeta variation; Muller & identical \\
+\fn{p\_shell\_term} vs.\ numerical potential of the contracted density ($n=2,3,4$, $R=0.5$--$8$ bohr) & $6\times10^{-10}$ \\
+electrostatic energy with a real double zeta: before / after & 266.70 / 273.09 eV \\
+zeta variation: $|c_1^2+c_2^2+2c_1c_2S_{12}-1|$ after each step; change of $c_1/c_2$ & $10^{-6}$ (printed digits); $<4\times10^{-6}$ \\
+Muller with a double-zeta table vs.\ single-zeta table & identical (plus the notice) \\
+viewkel: $p$ radial table vs.\ $c_1\chi(\zeta_1)+c_2\chi(\zeta_2)$; old 19-field \texttt{.MO} & $2\times10^{-15}$; single zeta \\
+netCDF (\texttt{-DINCLUDE\_NETCDF\_SUPPORT}): entries 10--13 ($d$, Mo) and 20--22 ($p$) & as in the \texttt{.out} \\
+\bottomrule
+\end{tabular}
+\end{center}
+\file{tests/spin\_soc/run\_tests.py} still passes. Double-zeta $s$ is not supported.
 
 %=====================================================================
 \section{Small fixes}\label{sec:fixes}
@@ -1708,17 +1765,7 @@ The changes are independent enough to be reviewed in three steps:
 \item viewkel: the remaining old defects listed in Section~\ref{sec:viewkel}.
 \item yaehmop-bandfit: use the new \texttt{bind} directly (spinor \texttt{.HAM}, the
   \texttt{\_up}/\texttt{\_down} outputs and \texttt{.spin}).
-\item \textbf{Pending: post-processing with double-zeta $p$} (Section~\ref{sec:pdz}). These
-  routines still use only the first $p$ exponent and must learn the second one:
-  the \texttt{.MO} file written for viewkel (\file{genutil.c}, block \texttt{\#begin\_parms},
-  which lists \var{exp\_p} only), the netCDF output (\file{netCDF\_support.c}), the molecular
-  electrostatics (\file{electrostat.c}), the charge iteration of the exponents
-  (\file{muller.c}) and the zeta variation (\file{zetas.c}). Double-zeta $s$ is not
-  supported.
-\item \textbf{Pending: viewkel with double-zeta $p$.} \file{viewkel/fit\_orbs.c} builds a $p$
-  atomic orbital with one exponent (\var{zeta2}$=0$), so MO isosurfaces and contours of a
-  double-zeta $p$ shell are drawn with the inner function only; it must read the second
-  exponent and coefficients from the \texttt{.MO} file once \file{genutil.c} writes them.
+\item Double-zeta $s$ shells (Section~\ref{sec:pdz}).
 \item The legacy makefiles other than \file{Makefile} and \file{makefile.linux}.
 \end{itemize}
 

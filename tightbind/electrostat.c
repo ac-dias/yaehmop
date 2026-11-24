@@ -311,6 +311,44 @@ fprintf(stderr,"Atom %d p orbital occupation: %lg\n",i,accum[orbs_so_far]);
  *  I've tried to keep the notation in the code similar.
  *
  ****************************************************************************/
+
+/* 1/R minus the screening term of a normalized Slater shell density
+   (radial part r^(2n-2) exp(-2 zeta r)), R in bohr. This is the expression
+   the original code wrote inline for s and single-zeta p shells. */
+static real sto_shell_term(int n,real zeta,real R)
+{
+  int p;
+  real p_sum;
+
+  p_sum = 0;
+  for(p=1; p <= 2*n; p++){
+    p_sum += pow((2.0*R*zeta),(2*n-p)) *   (real)p / (real)factorial(2*n-p);
+  }
+  p_sum *= exp(-2.0*R*zeta)/(2.0*n*R);
+  return 1/R - p_sum;
+}
+
+/* Same term for the p shell of 'atom. A double-zeta p shell
+   c1 chi(z1) + c2 chi(z2) has the density
+     c1^2 rho(z1) + c2^2 rho(z2) + 2 c1 c2 S12 rho((z1+z2)/2),
+   with rho the normalized density of one exponent and
+   S12 = [4 z1 z2/(z1+z2)^2]^(n+1/2) (the overlap used to normalize the
+   contraction in fill_atomic_parms), so the weights add up to 1. */
+static real p_shell_term(atom_type *atom,real R)
+{
+  real z1,z2,c1,c2,S12;
+
+  if( atom->coeff_p2 == 0 ) return sto_shell_term(atom->np,atom->exp_p,R);
+  z1 = atom->exp_p;
+  z2 = atom->exp_p2;
+  c1 = atom->coeff_p1;
+  c2 = atom->coeff_p2;
+  S12 = pow(4.0*z1*z2/((z1+z2)*(z1+z2)),(real)atom->np+.5);
+  return c1*c1*sto_shell_term(atom->np,z1,R) +
+    c2*c2*sto_shell_term(atom->np,z2,R) +
+    2.0*c1*c2*S12*sto_shell_term(atom->np,0.5*(z1+z2),R);
+}
+
 void eval_electrostatics(cell_type *cell,int num_orbs,eigenset_type eigenset,real *occupations,
                          real *OP_mat,int *orbital_lookup_table,
                          real *electrostat_term,real *eHMO_term,real *total_E,real *accum,real *net_chgs)
@@ -436,15 +474,7 @@ void eval_electrostatics(cell_type *cell,int num_orbs,eigenset_type eigenset,rea
         orbs_so_far++;
       }
       if( atomA->np != 0){
-        zeta = atomA->exp_p;
-        n = atomA->np;
-        p_sum = 0;
-        for(p=1; p <= 2*n; p++){
-          p_sum += pow((2.0*R*zeta),(2*n-p)) *   (real)p / (real)factorial(2*n-p);
-        }
-        p_sum *= exp(-2.0*R*zeta)/(2.0*n*R);
-
-        rhoA_term += accum[orbs_so_far] * (1/R - p_sum);
+        rhoA_term += accum[orbs_so_far] * p_shell_term(atomA,R);
         orbs_so_far++;
       }
       if( atomA->nd != 0){
@@ -473,15 +503,7 @@ void eval_electrostatics(cell_type *cell,int num_orbs,eigenset_type eigenset,rea
         orbs_so_far++;
       }
       if( atomB->np != 0){
-        zeta = atomB->exp_p;
-        n = atomB->np;
-        p_sum = 0;
-        for(p=1; p <= 2*n; p++){
-          p_sum += pow((2.0*R*zeta),(2*n-p)) *   (real)p / (real)factorial(2*n-p);
-        }
-        p_sum *= exp(-2.0*R*zeta)/(2.0*n*R);
-
-        rhoB_term += accum[orbs_so_far] * (1/R - p_sum);
+        rhoB_term += accum[orbs_so_far] * p_shell_term(atomB,R);
         orbs_so_far++;
       }
       if( atomB->nd != 0){

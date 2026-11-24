@@ -40,6 +40,24 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "bind.h"
 
 
+/* renormalize a double-zeta p contraction after its exponents change, keeping
+   c1/c2: c1^2 + c2^2 + 2 c1 c2 S12 = 1, S12 = [4 z1 z2/(z1+z2)^2]^(n+1/2)
+   (the normalization of fill_atomic_parms). */
+static void renormalize_p_contraction(atom_type *atom)
+{
+  real z1,z2,S12,norm;
+
+  z1 = atom->exp_p;
+  z2 = atom->exp_p2;
+  if( z1 <= 0.0 || z2 <= 0.0 )
+    fatal("Zeta variation made a double-zeta p exponent non-positive.");
+  S12 = pow(4.0*z1*z2/((z1+z2)*(z1+z2)),(real)atom->np+.5);
+  norm = sqrt(atom->coeff_p1*atom->coeff_p1 + atom->coeff_p2*atom->coeff_p2 +
+              2.0*S12*atom->coeff_p1*atom->coeff_p2);
+  if( norm <= 0.0 ) fatal("Non-positive p contraction norm in zeta variation.");
+  atom->coeff_p1 /= norm;
+  atom->coeff_p2 /= norm;
+}
 
 
 /****************************************************************************
@@ -114,7 +132,17 @@ void update_zetas(cell_type *cell,real *net_chgs,real zeta_tol,int *converged,ch
       atom->exp_s += .1*delta/atom->ns;
       fprintf(output_file,"%lg\n ",atom->exp_s);
     }
-    if( atom->np != 0){
+    if( atom->np != 0 && atom->coeff_p2 != 0 ){
+      /* double-zeta p: both exponents get the same shift */
+      fprintf(output_file,"\t %dP DZ: %lg %lg (%lg %lg) -> ",atom->np,
+              atom->exp_p,atom->exp_p2,atom->coeff_p1,atom->coeff_p2);
+      atom->exp_p += .1*delta/atom->np;
+      atom->exp_p2 += .1*delta/atom->np;
+      renormalize_p_contraction(atom);
+      fprintf(output_file,"%lg %lg (%lg %lg)\n ",atom->exp_p,atom->exp_p2,
+              atom->coeff_p1,atom->coeff_p2);
+    }
+    else if( atom->np != 0){
       fprintf(output_file,"\t %dP: %lg -> ",atom->np,atom->exp_p);
       atom->exp_p += .1*delta/atom->np;
       fprintf(output_file,"%lg\n ",atom->exp_p);

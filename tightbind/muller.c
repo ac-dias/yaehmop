@@ -68,6 +68,17 @@ void calc_muller_init_parms(atom_type *atom)
 {
   real *E_vals,*Z_vals;
 
+  /* the Muller parameters give a single-zeta p (as for d below): a double-zeta
+     p from the parameter table is replaced */
+  if( atom->np && atom->coeff_p2 != 0 ){
+    fprintf(output_file,
+            "; Muller iteration: the double-zeta %dP of %s is replaced by a single zeta.\n",
+            atom->np,atom->symb);
+  }
+  atom->exp_p2 = 0;
+  atom->coeff_p1 = 1;
+  atom->coeff_p2 = 0;
+
   if( atom->nd ){
     E_vals = atom->muller_d_E;
     Z_vals = atom->muller_d_Z;
