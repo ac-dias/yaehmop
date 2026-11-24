@@ -426,8 +426,13 @@ void eval_electrostatics(cell_type *cell,int num_orbs,eigenset_type eigenset,rea
 
   ******/
   *eHMO_term = 0.0;
-  for(i=0;i<num_orbs;i++){
-    *eHMO_term += EIGENVAL(eigenset,i)*occupations[i];
+  if( soc_active() ){
+    /* SOC: the 2n spinor levels, one electron each (soc.c) */
+    *eHMO_term = soc_occupied_energy();
+  } else {
+    for(i=0;i<num_orbs;i++){
+      *eHMO_term += EIGENVAL(eigenset,i)*occupations[i];
+    }
   }
 
 

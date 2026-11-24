@@ -1051,8 +1051,10 @@ void parse_printing_options(FILE *infile,detail_type *details,cell_type *cell)
           if( print_info->contrib1 < 0 || print_info->contrib2 < 0 ){
             fatal("Projected atom number less than 1 in walsh printing region.");
           }
+          /* reduced charge matrix: atom contrib1 in MO contrib2 (the MO is
+             checked when the number of orbitals is known, in walsh.c) */
           if( print_info->contrib1 > cell->num_atoms-1 ||
-             print_info->contrib2 > cell->num_atoms-1 ){
+             (which != PRT_RCHG_MAT && print_info->contrib2 > cell->num_atoms-1) ){
             fatal("Projected atom number greater than num_atoms in walsh printing region.");
           }
         }
@@ -1367,7 +1369,7 @@ void parse_charge_iteration(FILE *infile,detail_type *details,cell_type *cell)
   int i,j;
   int EOF_hit;
   int which;
-  int *numbers_read;
+  int *numbers_read=0;     /* parse_integer_string frees a non-null pointer */
   int num_read,num_to_vary;
   int num_parm_lines;
   chg_it_parm_type *parms;
@@ -1398,6 +1400,7 @@ void parse_charge_iteration(FILE *infile,detail_type *details,cell_type *cell)
         /* loop through and tag each atom that's going to be iterated */
         for(j=0;j<num_read;j++) cell->atoms[numbers_read[j]-1].chg_it_vary = 1;
         free(numbers_read);
+        numbers_read = 0;
       }
       /*----------------------------------------------------------------------*/
       else if(strstr(instring, "ADJUST")){
@@ -2147,6 +2150,11 @@ calculation.\n");
       else if(strstr(instring,"SYM")){
         fprintf(status_file,"Symmetry will be used in the calculations.\n");
         details->use_symmetry = 1;
+      }
+      /*----------------------------------------------------------------------*/
+      else if( strstr(instring,"SPIN RESOLVED DOS") ){
+        /* SOC: spin-up and spin-down parts of each projected DOS curve */
+        details->spin_resolved_DOS = 1;
       }
       /*----------------------------------------------------------------------*/
       else if( strstr(instring,"NO TOTAL DOS") ){

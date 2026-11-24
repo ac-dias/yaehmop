@@ -250,7 +250,7 @@ void inner_wrapper(char *file_name, bool use_stdin_stdout){
                                   num_orbs,orbital_lookup_table,0);
           /* SOC with two spin tables: spin-down hamiltonian (soc.c) */
           soc_build_down_hamiltonian(unit_cell,details,Overlap_R,num_orbs,
-                                     orbital_lookup_table);
+                                     orbital_lookup_table,tot_overlaps);
 
 
         }
@@ -269,7 +269,7 @@ void inner_wrapper(char *file_name, bool use_stdin_stdout){
                                   num_orbs,orbital_lookup_table,0);
           /* SOC with two spin tables: spin-down hamiltonian (soc.c) */
           soc_build_down_hamiltonian(unit_cell,details,Overlap_R,num_orbs,
-                                     orbital_lookup_table);
+                                     orbital_lookup_table,tot_overlaps);
 
         }
         else if( details->Execution_Mode == THIN ){
@@ -358,6 +358,8 @@ void inner_wrapper(char *file_name, bool use_stdin_stdout){
             if( details->Execution_Mode == MOLECULAR && details->vary_zeta ){
               update_zetas(unit_cell,properties.net_chgs,
                           (real)unit_cell->num_atoms*ZETA_TOL,&zeta_converged,NORMAL);
+              /* SOC with two spin tables: same change in the spin-down table */
+              soc_follow_down(unit_cell);
             }
             else{
               zeta_converged = 1;
@@ -374,6 +376,8 @@ void inner_wrapper(char *file_name, bool use_stdin_stdout){
             if( details->do_chg_it ){
               update_chg_it_parms(details,unit_cell,work2,&Hii_converged,num_orbs,
                                   orbital_lookup_table);
+              /* SOC with two spin tables: same change in the spin-down table */
+              soc_follow_down(unit_cell);
 
             }else if( details->do_muller_it ){
 

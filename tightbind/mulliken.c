@@ -83,13 +83,15 @@ void calc_occupations(detail_type *details,real num_electrons,int num_orbs,real 
   /* now check for degeneracies */
   last_occup = i-1;
   end_degen = i;
-  while( fabs(EIGENVAL(eigenset,last_occup) - EIGENVAL(eigenset,end_degen)) < DEGEN_TOL
-        && end_degen < num_orbs ){
+  /* bounds first: the original read val[num_orbs], and val[-1] when there
+     are no electrons (last_occup = -1) */
+  while( last_occup >= 0 && end_degen < num_orbs &&
+         fabs(EIGENVAL(eigenset,last_occup) - EIGENVAL(eigenset,end_degen)) < DEGEN_TOL ){
     end_degen++;
   }
   begin_degen = last_occup - 1;
-  while( fabs(EIGENVAL(eigenset,last_occup) - EIGENVAL(eigenset,begin_degen)) < DEGEN_TOL
-        && begin_degen > -1){
+  while( begin_degen > -1 &&
+         fabs(EIGENVAL(eigenset,last_occup) - EIGENVAL(eigenset,begin_degen)) < DEGEN_TOL ){
     begin_degen--;
   }
   /* we went one step too far, so increment begin_degen */

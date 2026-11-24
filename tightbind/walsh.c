@@ -473,7 +473,7 @@ void walsh_output(detail_type *details,cell_type *cell,int num_orbs,eigenset_typ
       case PRT_RCHG_MAT:
         switch(p_info->type){
         case P_DOS_ATOM:
-          fprintf(walsh_file,"# %d Reduced charge matrix element between atoms %d and %d\n",
+          fprintf(walsh_file,"# %d Reduced charge matrix element of atom %d in MO %d\n",
                   things_so_far,p_info->contrib1+1,p_info->contrib2+1);
           things_so_far++;
           break;
@@ -613,8 +613,16 @@ void walsh_output(detail_type *details,cell_type *cell,int num_orbs,eigenset_typ
     case PRT_RCHG_MAT:
       switch(p_info->type){
       case P_DOS_ATOM:
-        fprintf(walsh_file,"%8.6lf ",properties.Rchg_mat[p_info->contrib1*cell->num_atoms
-                                                          +p_info->contrib2]);
+        /* Rchg_mat is atoms x MOs (reduced_charge_mat); the original read it
+           with a stride of num_atoms */
+        if( soc_active() ){
+          fprintf(walsh_file,"%8.6lf ",soc_rchg_element(p_info->contrib1,p_info->contrib2));
+        } else {
+          if( p_info->contrib2 >= num_orbs )
+            fatal("Walsh: MO number of the reduced charge matrix out of range.");
+          fprintf(walsh_file,"%8.6lf ",properties.Rchg_mat[p_info->contrib1*num_orbs
+                                                            +p_info->contrib2]);
+        }
           break;
       }
       break;
@@ -628,6 +636,10 @@ void walsh_output(detail_type *details,cell_type *cell,int num_orbs,eigenset_typ
     case PRT_WAVE_FUNC:
       switch(p_info->type){
       case P_DOS_ORB:
+        if( soc_active() ){
+          /* SOC: sqrt(|c_up|^2 + |c_down|^2) of AO contrib1 in spinor state contrib2 */
+          fprintf(walsh_file,"%8.6lf ",soc_coeff_modulus(p_info->contrib2,p_info->contrib1));
+        } else
         fprintf(walsh_file,"%8.6lf ",EIGENVECT_R(eigenset,p_info->contrib2,
                                                  p_info->contrib1));
         break;
@@ -663,6 +675,9 @@ void walsh_output(detail_type *details,cell_type *cell,int num_orbs,eigenset_typ
       fprintf(walsh_file,"%8.6lf ",EIGENVAL(eigenset,p_info->contrib1));
       break;
     case PRT_ORB_COEFF:
+      if( soc_active() ){
+        fprintf(walsh_file,"%8.6lf ",soc_coeff_modulus(p_info->contrib2,p_info->contrib1));
+      } else
       fprintf(walsh_file,"%8.6lf ",
               EIGENVECT_R(eigenset,p_info->contrib2,p_info->contrib1));
       break;

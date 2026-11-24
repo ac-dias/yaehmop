@@ -122,7 +122,9 @@ int *my_realloc(int *ptr, int size)
 {
   int *tptr;
 
-  tptr = (int *)calloc(1,size);
+  /* realloc knows the old size: the original calloc + bcopy of 'size bytes
+     read past the end of the old (smaller) block */
+  tptr = (int *)realloc(ptr,size);
   if( !tptr ){
     fprintf(stderr,"Calloc failed getting %6.2f K in realloc.  Total allocated: %6.2f Meg\n",
             (float)(size)/1024,(float)tot_usage/(1024*1024));
@@ -133,10 +135,6 @@ int *my_realloc(int *ptr, int size)
     tot_usage += size;
   }
 
-  /* we've got the new memory, copy in the old data */
-  bcopy(ptr,tptr,size);
-  /* free up the old pointer */
-  free(ptr);
   return tptr;
 }
 
@@ -297,7 +295,8 @@ void allocate_matrices(cell_type *cell,detail_type *details,
          || details->the_COOPS
          || details->num_FMO_frags
          || details->num_FCO_frags
-         || details->band_info ){
+         || details->band_info
+         || soc_needs_R_overlaps() ){
         mem_per_overlapR = num_orbs*(num_orbs)*(*tot_overlaps);
         mem_per_overlapK = num_orbs*(num_orbs);
         details->store_R_overlaps = 1;
@@ -430,7 +429,8 @@ is present.\n");
 
     /* only get space for mulliken population analysis if we need to */
       if( details->OP_mat_PRT || details->ROP_mat_PRT || details->net_chg_PRT
-          || details->vary_zeta || details->avg_props){
+          || details->vary_zeta || details->avg_props || details->mod_OP_mat_PRT
+          || details->mod_ROP_mat_PRT || details->mod_net_chg_PRT){
         properties->OP_mat = (real *)my_calloc(num_orbs*(num_orbs),sizeof(real));
         properties->net_chgs = (real *)my_calloc(cell->num_atoms,sizeof(real));
         if( !(properties->net_chgs) || !(properties->OP_mat) )
@@ -525,12 +525,21 @@ is present.\n");
         /* get memory for the FMO properties stuff (if we need them) */
         if( details->num_FMO_frags || details->num_FCO_frags){
           (*avg_prop_info)[i].FMO_orbs =
-            (float *)my_calloc(num_orbs*(num_orbs),sizeof(float));
+            (float *)my_calloc(num_spin_comp*num_orbs*(num_orbs),sizeof(float));
           (*avg_prop_info)[i].FMO_orbsI =
-            (float *)my_calloc(num_orbs*(num_orbs),sizeof(float));
+            (float *)my_calloc(num_spin_comp*num_orbs*(num_orbs),sizeof(float));
           (*avg_prop_info)[i].FMO_chg_mat =
-            (float *)my_calloc(num_orbs*(num_orbs),
+            (float *)my_calloc(num_spin_comp*num_orbs*(num_orbs),
                             sizeof(float));
+          /* SOC: 2n spinor states, spin-down part of the FMO coefficients */
+          if( num_spin_comp == 2 ){
+            (*avg_prop_info)[i].FMO_orbs_dn =
+              (float *)my_calloc(2*num_orbs*num_orbs,sizeof(float));
+            (*avg_prop_info)[i].FMO_orbsI_dn =
+              (float *)my_calloc(2*num_orbs*num_orbs,sizeof(float));
+            if( !(*avg_prop_info)[i].FMO_orbsI_dn )
+              fatal("Can't get memory for the SOC FMO coefficients.");
+          }
           if( !(*avg_prop_info)[i].FMO_chg_mat )
             fatal("Can't get memory for an FMO array within the avg_prop_info array.");
         }
@@ -675,6 +684,8 @@ void cleanup_memory()
         CONDITIONAL_FREE(avg_prop_info[i].FMO_orbs);
         CONDITIONAL_FREE(avg_prop_info[i].FMO_orbsI);
         CONDITIONAL_FREE(avg_prop_info[i].FMO_chg_mat);
+        CONDITIONAL_FREE(avg_prop_info[i].FMO_orbs_dn);
+        CONDITIONAL_FREE(avg_prop_info[i].FMO_orbsI_dn);
       }
     }
     free(avg_prop_info);

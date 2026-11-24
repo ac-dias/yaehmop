@@ -612,10 +612,287 @@ def test_soc_spin(bind, tmp):
                                           "Fe_dn_samez.dat", "Fe.bind"], sd)
     m1 = float(grep(o, "#TOTAL_SPIN_MOMENT")[0].split()[-1])
     check("SOC + spin, lambda=0.06: moment changes a little", 0 < abs(m1 - m) < 0.1, f"{m1:.4f}")
-    r = run(bind, ["--soc", "fe.dat", "--parm-up", "Fe_up.dat", "--parm-down", "Fe_down.dat",
-                   "Fe.bind"], sd, expect_ok=False)
-    check("SOC + spin with different zetas refused",
-          any("zetas" in l for l in grep(sd / "Fe.bind.status", "FATAL")))
+    # different zetas in the two tables: S = diag(S_up, S_down)
+    dz = d / "diffz"; dz.mkdir()
+    for f in ("Fe.bind", "Fe_up.dat", "Fe_down.dat", "fe0.dat"):
+        shutil.copy(d / f, dz / f)
+    run(bind, ["--common-fermi"] + K + ["--parm-up", "Fe_up.dat", "--parm-down", "Fe_down.dat",
+                                         "Fe.bind"], dz)
+    Sz = spin_summary(dz / "Fe.bind.spin")
+    _, ezu = read_band(dz / "Fe_up.bind.band"); _, ezd = read_band(dz / "Fe_down.bind.band")
+    zs = dz / "soc"; zs.mkdir()
+    for f in ("Fe.bind", "Fe_up.dat", "Fe_down.dat", "fe0.dat"):
+        shutil.copy(dz / f, zs / f)
+    run(bind, ["--soc", "fe0.dat"] + K + ["--parm-up", "Fe_up.dat", "--parm-down", "Fe_down.dat",
+                                           "Fe.bind"], zs)
+    oz = zs / "Fe.bind.out"
+    _, ezs = read_band(zs / "Fe.bind.band")
+    dbz = np.abs(np.sort(np.hstack([ezu, ezd]), 1) - ezs).max()
+    mz = float(grep(oz, "#TOTAL_SPIN_MOMENT")[0].split()[-1])
+    check("SOC + spin, different zetas, lambda=0: bands = spin up and spin down bands together",
+          dbz < 1e-6, f"{dbz:.1e}")
+    check("SOC + spin, different zetas, lambda=0: Fermi level and moment of the spin run",
+          abs(fermi(oz) - Sz["Fermi_Energy"]) < 1e-6 and abs(mz - Sz["MAGNETIC_MOMENT"]) < 1e-5,
+          f"E_F {fermi(oz):.6f} vs {Sz['Fermi_Energy']:.6f}, m {mz:.6f} vs {Sz['MAGNETIC_MOMENT']:.6f}")
+    check("SOC + spin, different zetas: recorded in the output",
+          any("different" in l for l in grep(oz, "#SOC_SPIN_ZETAS")))
+
+
+MOLECULE_CO2 = """[CO2]
+molecular
+
+electrons
+16
+
+geometry
+3
+1 C 0 0 0
+2 O 0 0 1.16
+3 O 0.3 0 -1.16
+"""
+
+
+def mo_file(path):
+    """coefficient blocks of a .MO file: list of complex arrays"""
+    out = []
+    for b in re.findall(r"#begin_mo[^\n]*\n(.*?)#end_mo", Path(path).read_text(), re.S):
+        v = []
+        for l in b.splitlines():
+            if l.startswith(";") or not l.strip():
+                continue
+            x = l.split()
+            v.append(complex(float(x[0]), float(x[1]) if len(x) > 1 else 0.0))
+        out.append(np.array(v))
+    return out
+
+
+def section_numbers(path, title):
+    """numbers of the block that follows the last line containing 'title', up to a blank line"""
+    lines = Path(path).read_text().splitlines()
+    i = max(k for k, l in enumerate(lines) if title in l)
+    out = []
+    for l in lines[i + 1:]:
+        if not l.strip():
+            if out:
+                break
+            continue
+        if l.startswith(";") or l.startswith("#"):
+            continue
+        out += [float(v) for v in re.findall(r"-?\d+\.\d+", l)]
+    return np.array(out)
+
+
+def test_soc_molecule_options(bind, tmp):
+    """options that used to be refused with SOC, lambda = 0 against the spinless run"""
+    d = tmp / "socopt"; d.mkdir()
+    (d / "z.dat").write_text("C p 0.0\nO p 0.0\n")
+    co2 = MOLECULE_CO2 + """
+electrostat
+
+average properties
+
+print
+net charges
+mod overlap pop
+mod reduced overlap pop
+mod net charges
+reduced charge mat
+end_print
+
+dump sparse
+
+mo print
+all
+"""
+    ref = d / "ref"; ref.mkdir(); soc = d / "soc"; soc.mkdir()
+    for x in (ref, soc):
+        (x / "c.bind").write_text(co2); shutil.copy(d / "z.dat", x)
+    run(bind, ["c.bind", TABLE], ref)
+    run(bind, ["--soc", "z.dat", "c.bind", TABLE], soc)
+    a, b = ref / "c.bind.out", soc / "c.bind.out"
+    e = lambda o: float(grep(o, "Electrostatic Repulsion Energy")[-1].split()[-2])
+    h = lambda o: float(grep(o, "extended Hueckel Energy")[-1].split()[-2])
+    check("SOC lambda=0, molecule: electrostatic and EHT energies = spinless",
+          e(a) == e(b) and abs(h(a) - h(b)) < 1e-9, f"{e(b)} {h(b)}")
+    for t in ("Modified Mulliken Overlap Population", "Reduced Modified Mulliken",
+              "Modified Mulliken Net Atomic"):
+        x, y = section_numbers(a, t), section_numbers(b, t)
+        check(f"SOC lambda=0, molecule: {t} = spinless", x.shape == y.shape and
+              np.abs(x - y).max() < 1e-9)
+    check("SOC lambda=0, molecule: average net charges = spinless",
+          np.abs(net_charges(a) - net_charges(b)).max() < 1e-9)
+    # sparse dumps: same text format, spinor dimension, twice the nonzero elements
+    for f in ("c.bind.SPARSE.OV", "c.bind.SPARSE.HAM"):
+        ta, tb = (ref / f).read_text().split(), (soc / f).read_text().split()
+        check(f"SOC: {f[7:]} has the spinor dimension and twice the elements",
+              int(tb[0]) == 2 * int(ta[0]) and int(tb[1]) == 2 * int(ta[1]))
+    # .MO: each spinor state twice (spin up, spin down); state 1 = spinless MO 1 spin up
+    A, B = mo_file(ref / "c.bind.MO"), mo_file(soc / "c.bind.MO")
+    check("SOC .MO: 2 x 2n coefficient blocks", len(B) == 4 * len(A), f"{len(B)} vs {len(A)}")
+    check("SOC .MO, lambda=0: state 1 is spinless MO 1 with spin up",
+          np.abs(np.abs(B[0].real) - np.abs(A[0].real)).max() < 1e-9 and np.abs(B[1]).max() == 0)
+    # zeta variation
+    z = d / "zeta"; z.mkdir(); zr = z / "ref"; zr.mkdir(); zs = z / "soc"; zs.mkdir()
+    zin = MOLECULE_CO2 + "\naverage properties\n\nzeta\n"
+    for x in (zr, zs):
+        (x / "z.bind").write_text(zin); shutil.copy(d / "z.dat", x)
+    run(bind, ["z.bind", TABLE], zr); run(bind, ["--soc", "z.dat", "z.bind", TABLE], zs)
+    upd = lambda o: [l for l in Path(o).read_text().splitlines()
+                     if re.match(r"\s+\d+[SPDF]( DZ)?:.*->", l) or "Delta Charge" in l]
+    check("SOC lambda=0: zeta variation = spinless", upd(zr / "z.bind.out") == upd(zs / "z.bind.out")
+          and len(upd(zs / "z.bind.out")) > 0)
+    # Walsh items with MO coefficients (MO 1 is not degenerate)
+    w = d / "walsh"; w.mkdir(); wr = w / "ref"; wr.mkdir(); ws = w / "soc"; ws.mkdir()
+    win = """[CO2 walsh]
+molecular
+
+electrons
+16
+
+geometry z-matrix
+3
+1 C
+2 O 1 1000
+3 O 1 1000 2 180
+
+walsh
+1 3
+!1.10,1.20
+
+print
+reduced charge mat walsh
+atom 2 1
+wave func walsh
+orb 5 1
+orbital coeff walsh
+orb 5 1
+end_print
+"""
+    for x in (wr, ws):
+        (x / "w.bind").write_text(win); shutil.copy(d / "z.dat", x)
+    run(bind, ["w.bind", TABLE], wr); run(bind, ["--soc", "z.dat", "w.bind", TABLE], ws)
+    A, B = np.loadtxt(wr / "w.bind.walsh"), np.loadtxt(ws / "w.bind.walsh")
+    check("SOC lambda=0 Walsh: reduced charge matrix and |coefficient| of MO 1 = spinless",
+          A.shape == B.shape and np.abs(np.abs(A) - B).max() < 1e-6)
+
+
+def test_soc_fmo(bind, tmp):
+    d = tmp / "socfmo"; d.mkdir()
+    (d / "x.dat").write_text("Xe p 0.0\nF p 0.0\n")
+    ref = d / "ref"; ref.mkdir(); soc = d / "soc"; soc.mkdir()
+    for x in (ref, soc):
+        shutil.copy(EXAMPLES / "XeF4", x / "XeF4"); shutil.copy(d / "x.dat", x)
+    run(bind, ["XeF4", TABLE], ref); run(bind, ["--soc", "x.dat", "XeF4", TABLE], soc)
+    t = "FMO Mulliken Overlap Population"
+    x, y = section_numbers(ref / "XeF4.out", t), section_numbers(soc / "XeF4.out", t)
+    check("SOC lambda=0: FMO Mulliken populations = spinless", x.shape == y.shape and
+          np.abs(x - y).max() < 1e-9)
+    L = [l for l in (soc / "XeF4.FMO").read_text().splitlines() if l.strip() and not l.startswith(";")]
+    n = int(L[1].split()[1])
+    occ = [float(l.split()[1]) for l in L[4 + 2 + 40:4 + 2 + 40 + n]]
+    chg = np.array([[float(v) for v in l.split()] for l in L[-n:]])
+    check("SOC .FMO: 2n states with occupations, square charge matrix with rows adding to 1",
+          "OCCUP" in L[0].upper() and n == 40 and abs(sum(occ) - 36) < 1e-9 and chg.shape == (n, n)
+          and np.abs(chg.sum(1) - 1).max() < 2e-4, f"n={n} occ={sum(occ)}")
+    # FCO of a crystal
+    c = d / "fco"; c.mkdir(); cr = c / "ref"; cr.mkdir(); cs = c / "soc"; cs.mkdir()
+    diamond_input(c)
+    s = (c / "diamond.bind").read_text().replace("Dump Hamil\n", "").replace("Dump Overlap\n", "")
+    s += "\nFCO\n2\n4,4\n1\n2\n"
+    for x in (cr, cs):
+        (x / "d.bind").write_text(s)
+    (cs / "c.dat").write_text("C p 0.0\n")
+    run(bind, ["d.bind", TABLE], cr); run(bind, ["--soc", "c.dat", "d.bind", TABLE], cs)
+    def fco(path):
+        b = Path(path).read_bytes()
+        t, nk = np.frombuffer(b[:8], np.int32); n, nf = np.frombuffer(b[16:24], np.int32)
+        fo = np.frombuffer(b[24:24 + 4 * nf], np.int32); o = 24 + 4 * nf; ks = []
+        for _ in range(nk):
+            E = np.frombuffer(b[o:o + 8 * n]); o += 8 * n
+            o += 8 * fo.sum()
+            C = np.frombuffer(b[o:o + 8 * n * n]).reshape(n, n); o += 8 * n * n
+            ks.append((E, C))
+        return n, fo, ks, o == len(b)
+    n0, f0, k0, ok0 = fco(cr / "d.bind.FCO"); n1, f1, k1, ok1 = fco(cs / "d.bind.FCO")
+    worst = 0.0
+    for (E, C), (Es, Cs) in zip(k0, k1):
+        i = 0
+        while i < n0:
+            j = i
+            while j + 1 < n0 and abs(E[j + 1] - E[i]) < 1e-6:
+                j += 1
+            a = C[i:j + 1].sum(0); b = Cs[2 * i:2 * j + 2].reshape(-1, n0, 2).sum((0, 2))
+            worst = max(worst, np.abs(b - 2 * a).max()); i = j + 1
+    check("SOC .FCO: doubled layout; lambda=0 weights = 2 x spinless per level",
+          ok0 and ok1 and n1 == 2 * n0 and list(f1) == [2 * v for v in f0] and worst < 1e-12,
+          f"{worst:.1e}")
+
+
+def test_soc_spin_pdos(bind, tmp):
+    d = tmp / "socpdos"; d.mkdir()
+    K = fe_inputs(d)
+    s = (d / "Fe.bind").read_text().replace(
+        "Average Properties\n", "Average Properties\n\nprojected DOS\n2\natom 1 1.0\norbital 5 1.0\n"
+        "\nSpin Resolved DOS\n\n")
+    (d / "Fe.bind").write_text(s); (d / "fe0.dat").write_text("Fe d 0.0\n")
+    run(bind, ["--common-fermi"] + K + ["--parm-up", "Fe_up.dat", "--parm-down", "Fe_down.dat",
+                                         "Fe.bind"], d)
+    so = d / "soc"; so.mkdir()
+    for f in ("Fe.bind", "Fe_up.dat", "Fe_down.dat", "fe0.dat"):
+        shutil.copy(d / f, so / f)
+    run(bind, ["--soc", "fe0.dat"] + K + ["--parm-up", "Fe_up.dat", "--parm-down", "Fe_down.dat",
+                                           "Fe.bind"], so)
+    def pdos(path):
+        t = Path(path).read_text()
+        return [np.array([[float(v) for v in l.split()[:2]] for l in m.group(1).strip().splitlines()])
+                for m in re.finditer(r"### PROJECTED DENSITY OF STATES.*?#BEGIN CURVE\n(.*?)#END CURVE",
+                                     t, re.S)]
+    S, U, D = pdos(so / "Fe.bind.out"), pdos(d / "Fe_up.bind.out"), pdos(d / "Fe_down.bind.out")
+    def smooth(c, g, w=0.05):
+        return (c[:, 0][None, :] * np.exp(-0.5 * ((c[:, 1][None, :] - g[:, None]) / w) ** 2)).sum(1)
+    g = np.linspace(-30, 10, 2001); worst = 0.0; split = 0.0
+    for i in range(2):
+        T, Up, Dn = S[3 * i], S[3 * i + 1], S[3 * i + 2]
+        worst = max(worst, np.abs(smooth(Up, g) - smooth(U[i], g)).max(),
+                    np.abs(smooth(Dn, g) - smooth(D[i], g)).max())
+        split = max(split, np.abs(smooth(Up, g) + smooth(Dn, g) - smooth(T, g)).max())
+    check("SOC Spin Resolved DOS: up + down = total; lambda=0 = spin channels (different zetas)",
+          len(S) == 6 and split < 1e-5 and worst < 1e-3, f"{split:.1e} {worst:.1e}")
+
+
+def test_soc_spin_charge_iteration(bind, tmp):
+    d = tmp / "socchg"; d.mkdir()
+    ci = MOLECULE_CO2 + """
+Charge Iteration
+vary
+1-3
+toler
+0.0001
+parameters
+2
+C 0.6 -12.0 -21.4 0.6 -11.0 -11.4 0 0 0
+O 1.0 -14.0 -32.3 1.0 -13.0 -14.8 0 0 0
+end_charge
+"""
+    up = "\n".join([l for l in TABLE.read_text().splitlines() if re.match(r"^(C|O)\s", l)] + ["END"]) + "\n"
+    dn = re.sub(r"^(O\s+8\s+6\s+1\s+2\s+p\s+)(\S+)(\s+)(\S+)", lambda m: m.group(1) + "-14.300" +
+                m.group(3) + "2.1500", up, flags=re.M)
+    for x in ("ref", "same", "diff"):
+        (d / x).mkdir(); (d / x / "c.bind").write_text(ci)
+        (d / x / "up.dat").write_text(up); (d / x / "dn.dat").write_text(dn)
+        (d / x / "z.dat").write_text("O p 0.0\n")
+    run(bind, ["c.bind", "up.dat"], d / "ref")
+    run(bind, ["--soc", "z.dat", "--parm-up", "up.dat", "--parm-down", "up.dat", "c.bind"], d / "same")
+    run(bind, ["--soc", "z.dat", "--parm-up", "up.dat", "--parm-down", "dn.dat", "c.bind"], d / "diff")
+    q0, q1 = net_charges(d / "ref" / "c.bind.out"), net_charges(d / "same" / "c.bind.out")
+    check("SOC + two equal spin tables, lambda=0: charge iteration = spinless",
+          np.abs(q0 - q1).max() < 1e-6, f"{q1}")
+    o = (d / "diff" / "c.bind.out").read_text()
+    upO = re.findall(r"ATOM: O\(2\).*\n\s+2S:\s+(\S+)\s+\S+\n\s+2P:\s+(\S+)\s+\S+", o)[-1]
+    dnO = re.findall(r";\s+O2\s+(\S+)\s+(\S+)\s+\S+\s+\S+\s+\S+\s+(\S+)", o)[-1]
+    check("SOC + two spin tables: charge iteration keeps Hii(down) - Hii(up) and the down zeta",
+          abs(float(dnO[1]) - float(upO[1]) - 0.5) < 1e-3 and abs(float(dnO[0]) - float(upO[0])) < 1e-3
+          and float(dnO[2]) == 2.15, f"O p: {upO[1]} / {dnO[1]}")
 
 
 def test_errors(bind, tmp):
@@ -629,9 +906,29 @@ def test_errors(bind, tmp):
     check("error: SOC + spin with --nelec-up refused", r.returncode != 0 and "don't apply" in r.stderr)
     r = run(bind, ["--common-fermi", "diamond.bind"], d, expect_ok=False)
     check("error: --common-fermi without spin tables", r.returncode != 0)
-    run(bind, ["--soc", "soc.dat", "XeF4", TABLE], d, expect_ok=False)
-    check("error: SOC with FMO refused (message names FMO)",
-          any("FMO" in l for l in grep(d / "XeF4.status", "FATAL")))
+    # Muller iteration with two spin tables; FMO with different zetas
+    m = d / "muller"; m.mkdir()
+    co2 = MOLECULE_CO2 + "\naverage properties\n\nMuller It\nMuller Parms\n2\n1\n" \
+        "S 2.0 0.0 1.0 1.0 -24.4\n0.0 0.1 0.1 1.225\nP 2.0 0.0 1.0 1.0 -14.4\n0.0 0.1 0.1 1.225\n" \
+        "2,3\nS 2.0 0.0 1.0 1.0 -36.3\n0.0 0.1 0.1 1.875\nP 4.0 0.0 1.0 1.0 -20.8\n0.0 0.1 0.1 1.675\n"
+    (m / "m.bind").write_text(co2); (m / "z.dat").write_text("O p 0.0\n")
+    shutil.copy(TABLE, m / "t.dat")
+    run(bind, ["--soc", "z.dat", "--parm-up", "t.dat", "--parm-down", "t.dat", "m.bind"], m,
+        expect_ok=False)
+    check("error: Muller iteration with SOC and two spin tables refused",
+          any("Muller" in l for l in grep(m / "m.bind.status", "FATAL")))
+    x = d / "fmoz"; x.mkdir()
+    # F from the tables (the example gives F its own parameters in the input)
+    xin = (EXAMPLES / "XeF4").read_text().replace("2 * -1.90 0 0", "2 F -1.90 0 0")
+    xin = "\n".join(l for l in xin.splitlines() if not l.startswith("F 9 7"))
+    (x / "XeF4").write_text(xin + "\n"); (x / "s.dat").write_text("F p 0.0\n")
+    shutil.copy(TABLE, x / "up.dat")
+    (x / "dn.dat").write_text(re.sub(r"^(F\s+9\s+7\s+1\s+2\s+p\s+\S+\s+)(\S+)",
+                                     lambda mm: mm.group(1) + "2.6000", TABLE.read_text(), flags=re.M))
+    run(bind, ["--soc", "s.dat", "--parm-up", "up.dat", "--parm-down", "dn.dat", "XeF4"], x,
+        expect_ok=False)
+    check("error: FMO with SOC and two tables with different zetas refused",
+          any("FMO" in l for l in grep(x / "XeF4.status", "FATAL")))
 
 
 def main():
@@ -659,6 +956,10 @@ def main():
         test_spin_common_fermi(bind, tmp)
         test_spin_coop_scale(bind, tmp)
         test_soc_spin(bind, tmp)
+        test_soc_molecule_options(bind, tmp)
+        test_soc_fmo(bind, tmp)
+        test_soc_spin_pdos(bind, tmp)
+        test_soc_spin_charge_iteration(bind, tmp)
         test_errors(bind, tmp)
     finally:
         if a.keep:

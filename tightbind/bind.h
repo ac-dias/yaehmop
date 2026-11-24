@@ -596,6 +596,7 @@ typedef struct {
   float *S;                    /* S(k) (the overlap matrix) */
   float *chg_mat;              /* the charge matrix */
   float *FMO_orbs, *FMO_orbsI; /* the wavefunctions in the FMO basis*/
+  float *FMO_orbs_dn, *FMO_orbsI_dn; /* SOC: spin-down part in the FMO basis */
   float *FMO_chg_mat;          /* the charge matrix in the FMO basis*/
   float *energies;
   float *orbs_dn, *orbsI_dn;   /* SOC: spin-down part of the spinor states (adias-dev) */
@@ -840,6 +841,7 @@ typedef struct {
 
   /* DOS details */
   int num_proj_DOS;
+  int spin_resolved_DOS;      /* SOC: spin-up and spin-down projected DOS curves */
   p_DOS_type *proj_DOS;
 
   /* COOP stuff */

@@ -254,7 +254,7 @@ if( print_progress )
 
     /* spin-orbit coupling: 2n spinor energies (soc.c) */
     if( soc_active() ){
-      real *soc_E = soc_band_energies(details,hamilK,overlapK,num_orbs);
+      real *soc_E = soc_band_energies(details,hamilK,overlapK,num_orbs,kpoint);
       fprintf(band_file,"; K point: %lf %lf %lf\n",
               kpoint->loc.x,kpoint->loc.y,kpoint->loc.z);
       for(j=0;j<soc_num_states();j++){

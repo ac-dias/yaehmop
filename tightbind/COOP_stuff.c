@@ -130,6 +130,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
    /* figure out which overlap matrix and phase factor we should be using */
    which_overlap = overlap_tab_from_vect(&(COOP->cell),cell);
    overlap.mat = &(R_overlaps.mat[which_overlap*num_orbs*num_orbs]);
+   /* SOC with two spin tables and different zetas: spin-down functions */
+   if( spin == 1 && soc_down_overlap_R() )
+     overlap.mat = &(soc_down_overlap_R()[which_overlap*num_orbs*num_orbs]);
 
    /* check to see if we are doing a COOP w/in the unit cell */
    if( COOP->cell.x == 0.0 && COOP->cell.y == 0.0 && COOP->cell.z == 0.0 ){
@@ -423,8 +426,14 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
      answer=0;
 
      /* set pointers to FMO coefficients */
-     FMO_ptr = &(prop_info->FMO_orbs[orbital_ordering->MO*num_orbs]);
-     FMO_ptrI = &(prop_info->FMO_orbsI[orbital_ordering->MO*num_orbs]);
+     if( spin == 0 ){
+       FMO_ptr = &(prop_info->FMO_orbs[orbital_ordering->MO*num_orbs]);
+       FMO_ptrI = &(prop_info->FMO_orbsI[orbital_ordering->MO*num_orbs]);
+     } else {
+       /* SOC: spin-down part of the spinor state in the FMO basis */
+       FMO_ptr = &(prop_info->FMO_orbs_dn[orbital_ordering->MO*num_orbs]);
+       FMO_ptrI = &(prop_info->FMO_orbsI_dn[orbital_ordering->MO*num_orbs]);
+     }
 
      /* eval sum of coefficients in FMO expansion */
      accum = ((real)FMO_ptr[COOP->contrib1]*FMO_ptr[COOP->contrib2]

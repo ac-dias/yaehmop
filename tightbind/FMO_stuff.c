@@ -55,20 +55,27 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ****************************************************************************/
 void init_FMO_file(detail_type *details,int num_orbs,real num_electrons)
 {
-  int i;
+  int i,nsp;
 
   /* some error checking */
   if( !details->num_FMO_frags || !details->FMO_frags )
     FATAL_BUG("init_FMO_file called when FMO analysis isn't being done.");
 
-  fprintf(FMO_file,"# FMO Results\n");
-  fprintf(FMO_file,"#Total_number_of_orbitals: %d\n",num_orbs);
+  /* SOC: 2n spinor states; each fragment orbital (computed without SOC) is
+     listed twice, spin up then spin down, with the occupation of each entry
+     (one electron at most), so viewkel does not fill the levels by pairs */
+  nsp = soc_active() ? 2 : 1;
+  if( nsp == 2 )
+    fprintf(FMO_file,"# FMO Results with occupations (SOC: each fragment orbital twice, spin up and down)\n");
+  else
+    fprintf(FMO_file,"# FMO Results\n");
+  fprintf(FMO_file,"#Total_number_of_orbitals: %d\n",nsp*num_orbs);
   fprintf(FMO_file,"#Number_of_electrons: %lf\n",num_electrons);
   fprintf(FMO_file,"#Number_of_fragments: %d\n",details->num_FMO_frags);
   fprintf(FMO_file,"; number of orbitals and electrons in each fragment.\n");
 
   for(i=0;i<details->num_FMO_frags;i++){
-    fprintf(FMO_file,"%d %lf\n",details->FMO_frags[i].num_orbs,
+    fprintf(FMO_file,"%d %lf\n",nsp*details->FMO_frags[i].num_orbs,
             details->FMO_frags[i].num_electrons);
   }
 }
@@ -465,7 +472,14 @@ INCREASE to the right)\n");
     /* zero out the occupations array */
     bzero((char *)occupations,num_orbs*sizeof(real));
 
-    calc_occupations(0,FMO_frag->num_electrons,num_orbs,occupations,FMO_frag->eigenset);
+    {
+      /* SOC: the fragment orbitals are computed without SOC, two electrons
+         each (max_occup is 1 for the spinor states) */
+      real save_occup = max_occup;
+      if( soc_active() ) max_occup = 2.0;
+      calc_occupations(0,FMO_frag->num_electrons,num_orbs,occupations,FMO_frag->eigenset);
+      max_occup = save_occup;
+    }
 
     fprintf(output_file,"\n#\t****Fragment Energies (in eV) and Occupation Numbers ****\n");
     for(j=0;j<num_orbs;j++){
@@ -485,6 +499,11 @@ INCREASE to the right)\n");
     if( details->num_FMO_frags ){
       fprintf(FMO_file,"; Fragment %d orbital energies\n",i+1);
       for(j=0;j<num_orbs;j++){
+        if( soc_active() ){
+          /* spin up and spin down entries, half of the occupation each */
+          fprintf(FMO_file,"%lg %lg\n",EIGENVAL(FMO_frag->eigenset,j),0.5*occupations[j]);
+          fprintf(FMO_file,"%lg %lg\n",EIGENVAL(FMO_frag->eigenset,j),0.5*occupations[j]);
+        } else
         fprintf(FMO_file,"%lg\n",EIGENVAL(FMO_frag->eigenset,j));
       }
     }

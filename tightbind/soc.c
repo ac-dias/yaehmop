@@ -74,6 +74,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *******************************************************/
 #include "bind.h"
 
+extern atom_type custom_atoms[];   /* fileio.c: parameters given in the input file */
+#ifndef MAX_CUSTOM_ATOMS
+#define MAX_CUSTOM_ATOMS 40         /* as in fileio.c */
+#endif
+
 #define SOC_MAX_ENTRIES 512
 
 typedef struct {
@@ -100,9 +105,13 @@ static real *soc_tmp = 0;          /* work, n2 x n2 */
 static real *soc_spin = 0;         /* spin-up minus spin-down weight of each AO, n2 x n */
 /* SOC + spin polarization: second spin channel */
 static int soc_two_tables = 0;
-static real (*coul_dn)[4] = 0;     /* Hii (s,p,d,f) of every atom, spin down table */
+static atom_type *dn_atoms = 0;    /* parameters of every atom, spin-down table */
+static atom_type *up_prev = 0;     /* spin-up parameters at the last soc_follow_down */
+static int soc_diff_zetas = 0;     /* the two tables have different zetas */
 static real const_dn = -1.0;       /* K of the spin-down channel */
 static hermetian_matrix_type HdnR = {0,0}, HdnK = {0,0};
+static hermetian_matrix_type SdnR = {0,0}, SdnK = {0,0};  /* spin-down S (different zetas) */
+static real *SdR2 = 0, *SdI2 = 0;  /* dense spin-down S(k), n x n */
 
 int soc_active(void) { return soc_file_name != 0; }
 int soc_num_states(void) { return soc_dim; }
@@ -239,56 +248,89 @@ static int read_soc_file(const char *name, soc_entry_type *entries)
  *
  *   SOC on top of a spin-polarized calculation: H_spinor = diag(H_up(k),
  *   H_down(k)) + H_SOC.  The main parameter table (already in cell->atoms)
- *   is the spin-up one; this reads the Hii of the spin-down table
- *   (soc_parm_down).  Both tables must have the same basis and zetas, so that
- *   S_spinor = I2 (x) S still holds.  Special atoms ('*', parameters in the
- *   input file) are the same in both channels.
+ *   is the spin-up one; this reads the spin-down table (soc_parm_down) into
+ *   dn_atoms.  Both tables must have the same shells; Hii and zetas may
+ *   differ.  With different zetas the spin-down functions have their own
+ *   overlaps, S_spinor = diag(S_up(k), S_down(k)) (functions of different
+ *   spin are orthogonal whatever their radial parts), and the on-site
+ *   lambda of the SOC file is used as it is (it is a parameter: the radial
+ *   overlap of the up and down functions is absorbed in it).  Special atoms
+ *   ('*', parameters in the input file) are the same in both channels.
  *
  ****************************************************************************/
+static int zetas_differ(const atom_type *u, const atom_type *d)
+{
+  return fabs(u->exp_s - d->exp_s) > 1e-8 || fabs(u->exp_p - d->exp_p) > 1e-8 ||
+    fabs(u->exp_p2 - d->exp_p2) > 1e-8 || fabs(u->coeff_p1 - d->coeff_p1) > 1e-8 ||
+    fabs(u->coeff_p2 - d->coeff_p2) > 1e-8 ||
+    fabs(u->exp_d - d->exp_d) > 1e-8 || fabs(u->exp_d2 - d->exp_d2) > 1e-8 ||
+    fabs(u->coeff_d1 - d->coeff_d1) > 1e-8 || fabs(u->coeff_d2 - d->coeff_d2) > 1e-8 ||
+    fabs(u->exp_f - d->exp_f) > 1e-8 || fabs(u->exp_f2 - d->exp_f2) > 1e-8 ||
+    fabs(u->coeff_f1 - d->coeff_f1) > 1e-8 || fabs(u->coeff_f2 - d->coeff_f2) > 1e-8;
+}
+
 static void soc_setup_two_tables(cell_type *cell, detail_type *details, int num_orbs)
 {
   atom_type *dn;
   int i, na = cell->num_atoms;
-  char err[MAX_STR_LEN];
+  char err[MAX_STR_LEN], *special;
   real input_const = details->the_const;
 
   if( details->Execution_Mode == THIN )
     fatal("SOC with two spin tables is not implemented in THIN mode.");
-  if( details->do_chg_it || details->do_muller_it )
-    fatal("Charge iteration is not implemented for SOC with two spin tables.");
+  if( details->do_muller_it )
+    fatal("The Muller iteration is not implemented for SOC with two spin tables (it replaces\n"
+          "\tthe parameters of the tables by spin-independent ones); use Charge Iteration.");
 
   dn = (atom_type *)calloc(na,sizeof(atom_type));
-  coul_dn = calloc(na,sizeof(*coul_dn));
-  if( !dn || !coul_dn ) fatal("Can't allocate the spin-down parameters.");
+  special = (char *)calloc(na,sizeof(char));
+  if( !dn || !special ) fatal("Can't allocate the spin-down parameters.");
   memcpy(dn,cell->atoms,na*sizeof(atom_type));
-  /* special atoms keep the parameters of the input in both channels */
-  for(i=0;i<na;i++) if( dn[i].symb[0] == '*' ) dn[i].symb[0] = '&';
+  /* special atoms keep the parameters of the input in both channels
+     (fill_atomic_parms skips the atoms whose symbol starts with '&') */
+  for(i=0;i<na;i++){
+    int c;
+    if( dn[i].symb[0] == '*' ){ special[i] = 1; continue; }
+    /* atoms with parameters in the input file ('*' in the geometry) carry the
+       symbol of their custom entry after read_inputfile */
+    for(c=0;c<MAX_CUSTOM_ATOMS && custom_atoms[c].symb[0];c++){
+      char a[ATOM_SYMB_LEN], b[ATOM_SYMB_LEN];
+      strncpy(a,dn[i].symb,ATOM_SYMB_LEN); strncpy(b,custom_atoms[c].symb,ATOM_SYMB_LEN);
+      a[ATOM_SYMB_LEN-1] = b[ATOM_SYMB_LEN-1] = 0;
+      upcase(a); upcase(b);
+      if( !strcmp(a,b) ){ special[i] = 1; break; }
+    }
+  }
+  for(i=0;i<na;i++) if( special[i] ){ special[i] = dn[i].symb[0]; dn[i].symb[0] = '&'; }
   fill_atomic_parms(dn,na,(FILE *)0,soc_parm_down);
+  for(i=0;i<na;i++) if( special[i] ) dn[i].symb[0] = special[i];
   for(i=0;i<na;i++){
     atom_type *u = &(cell->atoms[i]), *d = &(dn[i]);
-    if( u->symb[0] == '&' ) continue;
-    if( u->symb[0] == '*' ){
-      coul_dn[i][0] = u->coul_s; coul_dn[i][1] = u->coul_p;
-      coul_dn[i][2] = u->coul_d; coul_dn[i][3] = u->coul_f;
-      continue;
-    }
-    if( u->ns != d->ns || u->np != d->np || u->nd != d->nd || u->nf != d->nf ||
-        fabs(u->exp_s - d->exp_s) > 1e-8 || fabs(u->exp_p - d->exp_p) > 1e-8 ||
-        fabs(u->exp_p2 - d->exp_p2) > 1e-8 || fabs(u->coeff_p1 - d->coeff_p1) > 1e-8 ||
-        fabs(u->coeff_p2 - d->coeff_p2) > 1e-8 ||
-        fabs(u->exp_d - d->exp_d) > 1e-8 || fabs(u->exp_d2 - d->exp_d2) > 1e-8 ||
-        fabs(u->coeff_d1 - d->coeff_d1) > 1e-8 || fabs(u->coeff_d2 - d->coeff_d2) > 1e-8 ||
-        fabs(u->exp_f - d->exp_f) > 1e-8 || fabs(u->exp_f2 - d->exp_f2) > 1e-8 ||
-        fabs(u->coeff_f1 - d->coeff_f1) > 1e-8 || fabs(u->coeff_f2 - d->coeff_f2) > 1e-8 ){
-      sprintf(err,"SOC with two spin tables: %s has a different basis or zetas in the "
-              "spin-down table.\n\tBoth channels must share the orbitals (only Hii may differ).",
-              u->symb);
+    if( u->symb[0] == '&' || special[i] ) continue;
+    if( u->ns != d->ns || u->np != d->np || u->nd != d->nd || u->nf != d->nf ){
+      sprintf(err,"SOC with two spin tables: %s has different shells in the spin-down table.\n"
+              "\tBoth channels must have the same orbitals (Hii and zetas may differ).",u->symb);
       fatal(err);
     }
-    coul_dn[i][0] = d->coul_s; coul_dn[i][1] = d->coul_p;
-    coul_dn[i][2] = d->coul_d; coul_dn[i][3] = d->coul_f;
+    if( zetas_differ(u,d) ) soc_diff_zetas = 1;
   }
-  free(dn);
+  free(special);
+  dn_atoms = dn;
+  up_prev = (atom_type *)calloc(na,sizeof(atom_type));
+  if( !up_prev ) fatal("Can't allocate the spin-up parameters.");
+  memcpy(up_prev,cell->atoms,na*sizeof(atom_type));
+
+  if( soc_diff_zetas ){
+    /* what still needs one set of functions per atom */
+    if( details->num_FMO_frags || details->num_FCO_frags )
+      fatal("FMO/FCO is not implemented for SOC with two spin tables with different zetas.");
+    if( details->num_MOs_to_print )
+      fatal("MO printing for viewkel is not implemented for SOC with two spin tables with\n"
+            "\tdifferent zetas (the .MO file has one set of functions per atom).");
+    if( details->Execution_Mode == MOLECULAR && details->eval_electrostat )
+      fatal("The electrostatic energy is not implemented for SOC with two spin tables with\n"
+            "\tdifferent zetas.");
+  }
 
   if( soc_const_up > 0.0 ) details->the_const = soc_const_up;
   const_dn = soc_const_down > 0.0 ? soc_const_down : input_const;
@@ -297,18 +339,98 @@ static void soc_setup_two_tables(cell_type *cell, detail_type *details, int num_
   HdnR.mat = (real *)calloc(num_orbs*num_orbs,sizeof(real));
   HdnK.mat = (real *)calloc(num_orbs*num_orbs,sizeof(real));
   if( !HdnR.mat || !HdnK.mat ) fatal("Can't allocate the spin-down hamiltonian.");
+  if( soc_diff_zetas ){
+    SdnK.dim = num_orbs;
+    SdnK.mat = (real *)calloc(num_orbs*num_orbs,sizeof(real));
+    SdR2 = (real *)calloc(num_orbs*num_orbs,sizeof(real));
+    SdI2 = (real *)calloc(num_orbs*num_orbs,sizeof(real));
+    if( !SdnK.mat || !SdR2 || !SdI2 ) fatal("Can't allocate the spin-down overlap.");
+  }
   soc_two_tables = 1;
 
   fprintf(output_file,"\n; SOC on top of two spin channels: H = diag(H_up, H_down) + H_SOC\n");
   fprintf(output_file,"#SOC_SPIN_TABLES: up (main table)  down %s\n",soc_parm_down);
+  fprintf(output_file,"#SOC_SPIN_ZETAS: %s\n",soc_diff_zetas ? "different" : "same");
+  if( soc_diff_zetas )
+    fprintf(output_file,"; different zetas: S = diag(S_up, S_down), each channel with its own functions\n");
   fprintf(output_file,"#THE_CONST_UP: %lf\n#THE_CONST_DOWN: %lf\n",details->the_const,const_dn);
   fprintf(output_file,"; atom   Hii up (s p d f)   /   Hii down (s p d f)\n");
   for(i=0;i<na;i++){
-    atom_type *u = &(cell->atoms[i]);
+    atom_type *u = &(cell->atoms[i]), *d = &(dn[i]);
     if( u->symb[0] == '&' ) continue;
     fprintf(output_file,"; %s%-3d %8.4lf %8.4lf %8.4lf %8.4lf / %8.4lf %8.4lf %8.4lf %8.4lf\n",
             u->symb,i+1,u->coul_s,u->coul_p,u->coul_d,u->coul_f,
-            coul_dn[i][0],coul_dn[i][1],coul_dn[i][2],coul_dn[i][3]);
+            d->coul_s,d->coul_p,d->coul_d,d->coul_f);
+    if( zetas_differ(u,d) )
+      fprintf(output_file,";      zetas up (s p d)  %7.4lf %7.4lf %7.4lf  down %7.4lf %7.4lf %7.4lf\n",
+              u->exp_s,u->exp_p,u->exp_d,d->exp_s,d->exp_p,d->exp_d);
+  }
+}
+
+/* SOC with two tables and different zetas: the R space overlaps of the
+   spin-down functions (COOP and average overlap populations), else 0 */
+real *soc_down_overlap_R(void)
+{
+  return (soc_two_tables && soc_diff_zetas) ? SdnR.mat : (real *)0;
+}
+/* the overlaps must be kept in R space (memory.c) */
+int soc_needs_R_overlaps(void)
+{
+  return soc_active() && soc_parm_down && soc_diff_zetas;
+}
+
+/* renormalize a contraction c1 chi(z1) + c2 chi(z2) of principal number n */
+static void renorm_contraction(int n, real z1, real z2, real *c1, real *c2)
+{
+  real S12, norm;
+  if( *c2 == 0.0 || z1 <= 0.0 || z2 <= 0.0 ) return;
+  S12 = pow(4.0*z1*z2/((z1+z2)*(z1+z2)),(real)n+.5);
+  norm = sqrt((*c1)*(*c1) + (*c2)*(*c2) + 2.0*S12*(*c1)*(*c2));
+  if( norm > 0.0 ){ *c1 /= norm; *c2 /= norm; }
+}
+
+/****************************************************************************
+ *
+ *                   Procedure soc_follow_down
+ *
+ *   SOC with two spin tables: after charge iteration or zeta variation
+ *   changed the spin-up parameters, give the spin-down ones the same
+ *   changes (Hii and exponents), so the difference between the two tables
+ *   (the exchange splitting) is kept.  Contractions are renormalized.
+ *
+ ****************************************************************************/
+void soc_follow_down(cell_type *cell)
+{
+  int i;
+  if( !soc_two_tables ) return;
+  for(i=0;i<cell->num_atoms;i++){
+    atom_type *u = &(cell->atoms[i]), *p = &(up_prev[i]), *d = &(dn_atoms[i]);
+    if( u->symb[0] == '&' ) continue;
+    d->coul_s += u->coul_s - p->coul_s;  d->coul_p += u->coul_p - p->coul_p;
+    d->coul_d += u->coul_d - p->coul_d;  d->coul_f += u->coul_f - p->coul_f;
+    d->exp_s += u->exp_s - p->exp_s;  d->exp_p += u->exp_p - p->exp_p;
+    d->exp_d += u->exp_d - p->exp_d;  d->exp_f += u->exp_f - p->exp_f;
+    if( d->coeff_p2 != 0.0 ){
+      d->exp_p2 += u->exp_p2 - p->exp_p2;
+      renorm_contraction(d->np,d->exp_p,d->exp_p2,&d->coeff_p1,&d->coeff_p2);
+    }
+    if( d->coeff_d2 != 0.0 ){
+      d->exp_d2 += u->exp_d2 - p->exp_d2;
+      renorm_contraction(d->nd,d->exp_d,d->exp_d2,&d->coeff_d1,&d->coeff_d2);
+    }
+    if( d->coeff_f2 != 0.0 ){
+      d->exp_f2 += u->exp_f2 - p->exp_f2;
+      renorm_contraction(d->nf,d->exp_f,d->exp_f2,&d->coeff_f1,&d->coeff_f2);
+    }
+    *p = *u;
+  }
+  fprintf(output_file,"; SOC spin-down table after the same changes: atom  Hii (s p d f)  zetas (s p d)\n");
+  for(i=0;i<cell->num_atoms;i++){
+    atom_type *d = &(dn_atoms[i]);
+    if( cell->atoms[i].symb[0] == '&' ) continue;
+    fprintf(output_file,";   %s%-3d %9.4lf %9.4lf %9.4lf %9.4lf   %7.4lf %7.4lf %7.4lf\n",
+            cell->atoms[i].symb,i+1,d->coul_s,d->coul_p,d->coul_d,d->coul_f,
+            d->exp_s,d->exp_p,d->exp_d);
   }
 }
 
@@ -321,32 +443,48 @@ static void soc_setup_two_tables(cell_type *cell, detail_type *details, int num_
  *   Called from driver.c right after the spin-up one is built.
  *
  ****************************************************************************/
+/* exchange the EHT parameters (Hii, exponents, contraction coefficients)
+   of two atoms; the rest (positions, symbols, ...) stays where it is */
+static void swap_parms(atom_type *a, atom_type *b)
+{
+#define SWP(f) { real t_ = a->f; a->f = b->f; b->f = t_; }
+  SWP(coul_s) SWP(coul_p) SWP(coul_d) SWP(coul_f)
+  SWP(exp_s) SWP(exp_p) SWP(exp_d) SWP(exp_f) SWP(exp_d2) SWP(exp_f2)
+  SWP(exp_p2) SWP(coeff_p1) SWP(coeff_p2) SWP(coeff_d1) SWP(coeff_d2) SWP(coeff_f1) SWP(coeff_f2)
+#undef SWP
+}
+
 void soc_build_down_hamiltonian(cell_type *cell, detail_type *details,
                                 hermetian_matrix_type overlapR, int num_orbs,
-                                int *orbital_lookup_table)
+                                int *orbital_lookup_table, int tot_overlaps)
 {
-  int i, na;
-  real save_const, (*save)[4];
+  int i;
+  real save_const;
   if( !soc_two_tables ) return;
-  na = cell->num_atoms;
-  save = calloc(na,sizeof(*save));
-  if( !save ) fatal("Can't build the spin-down hamiltonian.");
-  for(i=0;i<na;i++){
-    atom_type *a = &(cell->atoms[i]);
-    save[i][0] = a->coul_s; save[i][1] = a->coul_p; save[i][2] = a->coul_d; save[i][3] = a->coul_f;
-    if( a->symb[0] == '&' ) continue;
-    a->coul_s = coul_dn[i][0]; a->coul_p = coul_dn[i][1];
-    a->coul_d = coul_dn[i][2]; a->coul_f = coul_dn[i][3];
-  }
+  /* the spin-down channel: its own parameters (and overlaps, with different
+     zetas) through the usual routines; only the parameters are exchanged, so
+     positions and the rest of the atoms stay current (Walsh steps, ...) */
   save_const = details->the_const;
+  for(i=0;i<cell->num_atoms;i++)
+    if( cell->atoms[i].symb[0] != '&' ) swap_parms(&(cell->atoms[i]),&(dn_atoms[i]));
   details->the_const = const_dn;
-  full_R_space_Hamiltonian(cell,details,overlapR,HdnR,num_orbs,orbital_lookup_table,0);
-  details->the_const = save_const;
-  for(i=0;i<na;i++){
-    atom_type *a = &(cell->atoms[i]);
-    a->coul_s = save[i][0]; a->coul_p = save[i][1]; a->coul_d = save[i][2]; a->coul_f = save[i][3];
+  if( soc_diff_zetas ){
+    if( !SdnR.mat ){
+      SdnR.dim = num_orbs;
+      /* the size of Overlap_R (memory.c): one matrix for a molecule */
+      SdnR.mat = (real *)calloc((size_t)num_orbs*num_orbs*
+                                (details->Execution_Mode == MOLECULAR || tot_overlaps < 1 ? 1 : tot_overlaps),
+                                sizeof(real));
+      if( !SdnR.mat ) fatal("Can't allocate the spin-down overlap matrices.");
+    }
+    R_space_overlap_matrix(cell,details,SdnR,num_orbs,tot_overlaps,orbital_lookup_table,0);
+    full_R_space_Hamiltonian(cell,details,SdnR,HdnR,num_orbs,orbital_lookup_table,0);
+  } else {
+    full_R_space_Hamiltonian(cell,details,overlapR,HdnR,num_orbs,orbital_lookup_table,0);
   }
-  free(save);
+  details->the_const = save_const;
+  for(i=0;i<cell->num_atoms;i++)
+    if( cell->atoms[i].symb[0] != '&' ) swap_parms(&(cell->atoms[i]),&(dn_atoms[i]));
 }
 
 /****************************************************************************
@@ -374,27 +512,6 @@ void soc_setup(cell_type *cell, detail_type *details, int num_orbs,
   /******** what is not done with SOC yet (see yaehmop-dev.md) ********/
 #define SOC_REFUSE(cond,what) if( cond ){ \
     sprintf(err,"%s is not implemented with SOC yet.",what); fatal(err); }
-  SOC_REFUSE(details->num_FMO_frags || details->num_FCO_frags,"FMO/FCO");
-  {
-    /* Walsh diagrams work; the items that need single MO coefficients don't */
-    printing_info_type *p_info = details->step_print_options;
-    while( p_info ){
-      SOC_REFUSE(p_info->which_to_print == PRT_WAVE_FUNC ||
-                 p_info->which_to_print == PRT_ORB_COEFF,"Walsh printing of MO coefficients");
-      SOC_REFUSE(p_info->which_to_print == PRT_RCHG_MAT,"Walsh printing of the reduced charge matrix");
-      p_info = p_info->next;
-    }
-  }
-  SOC_REFUSE(details->num_MOs_to_print,"MO printing for viewkel (Print MOs)");
-  SOC_REFUSE(details->vary_zeta,"Zeta variation");
-  SOC_REFUSE(details->mod_OP_mat_PRT || details->mod_ROP_mat_PRT || details->mod_net_chg_PRT,
-             "Modified Mulliken analysis");
-  SOC_REFUSE(details->dump_sparse_mats,"Sparse matrix dump");
-  SOC_REFUSE(details->Execution_Mode == MOLECULAR && details->eval_electrostat,
-             "Electrostatic energy");
-#ifdef INCLUDE_NETCDF_SUPPORT
-  SOC_REFUSE(details->do_netCDF,"netCDF output");
-#endif
 #undef SOC_REFUSE
 
   if( soc_parm_down ) soc_setup_two_tables(cell,details,num_orbs);
@@ -500,7 +617,11 @@ void soc_setup(cell_type *cell, detail_type *details, int num_orbs,
     fprintf(f,"# on-site spin-orbit matrix H_SOC (eV) from %s\n",soc_file_name);
     fprintf(f,"# spinor basis: 1..%d spin up, %d..%d spin down (YAeHMOP orbital order)\n",
             num_orbs,num_orbs+1,n2);
-    fprintf(f,"# H_spinor(k) = I2 (x) H(k) + H_SOC,  S_spinor(k) = I2 (x) S(k)\n");
+    if( soc_two_tables )
+      fprintf(f,"# H_spinor(k) = diag(H_up(k), H_down(k)) + H_SOC,  S_spinor(k) = %s\n",
+              soc_diff_zetas ? "diag(S_up(k), S_down(k))" : "I2 (x) S(k)");
+    else
+      fprintf(f,"# H_spinor(k) = I2 (x) H(k) + H_SOC,  S_spinor(k) = I2 (x) S(k)\n");
     fprintf(f,"# nonzero elements: i j Re Im (1-based)\n");
     fprintf(f,"%d\n",n2);
     for(a=0;a<n2;a++) for(b=0;b<n2;b++){
@@ -525,15 +646,24 @@ static void packed_get(const real *mat, int n, int i, int j, real *re, real *im)
 
 /* packed spinor H(k), S(k) (dimension 2n) from the spinless ones */
 static void build_spinor(hermetian_matrix_type hamilK, hermetian_matrix_type overlapK,
-                         int num_orbs)
+                         int num_orbs, k_point_type *kpoint)
 {
   int n2 = soc_dim, I, J;
-  /* two spin tables: spin-down H(k) from its R space hamiltonian */
+  /* two spin tables: spin-down H(k) (and S(k), with different zetas) from
+     the R space matrices of the spin-down channel */
   if( soc_two_tables ){
+    hermetian_matrix_type sdn = overlapK;
+    if( soc_diff_zetas ){
+      if( details->Execution_Mode == MOLECULAR )
+        memcpy(SdnK.mat,SdnR.mat,num_orbs*num_orbs*sizeof(real));
+      else
+        build_k_overlap_FAT(unit_cell,kpoint,SdnR,SdnK,num_orbs);
+      sdn = SdnK;
+    }
     if( details->Execution_Mode == MOLECULAR )
       memcpy(HdnK.mat,HdnR.mat,num_orbs*num_orbs*sizeof(real));
     else
-      build_k_hamil_FAT(unit_cell,HdnR,HdnK,overlapK,num_orbs);
+      build_k_hamil_FAT(unit_cell,HdnR,HdnK,sdn,num_orbs);
   }
   for(I=0;I<n2;I++){
     for(J=I;J<n2;J++){
@@ -542,7 +672,8 @@ static void build_spinor(hermetian_matrix_type hamilK, hermetian_matrix_type ove
       if( a == b ){
         if( a == 1 && soc_two_tables ) packed_get(HdnK.mat,num_orbs,p,q,&hr,&hi);
         else packed_get(hamilK.mat,num_orbs,p,q,&hr,&hi);
-        packed_get(overlapK.mat,num_orbs,p,q,&sr,&si);
+        if( a == 1 && soc_two_tables && soc_diff_zetas ) packed_get(SdnK.mat,num_orbs,p,q,&sr,&si);
+        else packed_get(overlapK.mat,num_orbs,p,q,&sr,&si);
       }
       hr += socR[I*n2+J];
       hi += socI[I*n2+J];
@@ -603,32 +734,46 @@ static void extract_vectors(int num_orbs)
   }
 }
 
-/* charge matrix of the spinor states:
-     chg[J][mu] = sum over spins of Re( conj(c_mu) (S c)_mu )
-   (S_spinor = I2 (x) S, so the spins don't mix); each row adds up to 1. */
-static void spinor_charge_matrix(hermetian_matrix_type overlapK, int num_orbs)
+/* charge matrix of 2n spinor states with coefficients uR+i uI (spin up) and
+   dR+i dI (spin down), n2 x n each, over the packed overlap Sp (n x n):
+     chg[J][mu]  = sum over spins of Re( conj(c_mu) (S c)_mu )
+     spin[J][mu] = the same, spin up minus spin down
+   (S_spinor = I2 (x) S, so the spins don't mix); each row of chg adds up to 1. */
+static void spinor_weights(const real *Sp, const real *Sp_dn, int num_orbs, const real *uR,
+                           const real *uI, const real *dR, const real *dI, real *chg, real *spin)
 {
   int n2 = soc_dim, J, mu, nu, sp;
   for(mu=0;mu<num_orbs;mu++) for(nu=0;nu<num_orbs;nu++)
-    packed_get(overlapK.mat,num_orbs,mu,nu,&SdR[mu*num_orbs+nu],&SdI[mu*num_orbs+nu]);
+    packed_get(Sp,num_orbs,mu,nu,&SdR[mu*num_orbs+nu],&SdI[mu*num_orbs+nu]);
+  /* spin-down overlap (different zetas with two spin tables) */
+  if( Sp_dn != Sp )
+    for(mu=0;mu<num_orbs;mu++) for(nu=0;nu<num_orbs;nu++)
+      packed_get(Sp_dn,num_orbs,mu,nu,&SdR2[mu*num_orbs+nu],&SdI2[mu*num_orbs+nu]);
   for(J=0;J<n2;J++){
-    for(mu=0;mu<num_orbs;mu++) soc_chg[J*num_orbs+mu] = 0.0;
+    for(mu=0;mu<num_orbs;mu++) chg[J*num_orbs+mu] = 0.0;
     for(sp=0;sp<2;sp++){
-      real *vr = sp ? &vdnR[J*num_orbs] : &vupR[J*num_orbs];
-      real *vi = sp ? &vdnI[J*num_orbs] : &vupI[J*num_orbs];
+      const real *vr = sp ? &dR[J*num_orbs] : &uR[J*num_orbs];
+      const real *vi = sp ? &dI[J*num_orbs] : &uI[J*num_orbs];
       for(mu=0;mu<num_orbs;mu++){
         real scr = 0.0, sci = 0.0;
+        const real *SR = (sp && Sp_dn != Sp) ? SdR2 : SdR, *SI = (sp && Sp_dn != Sp) ? SdI2 : SdI;
         for(nu=0;nu<num_orbs;nu++){
-          real sr = SdR[mu*num_orbs+nu], si = SdI[mu*num_orbs+nu];
+          real sr = SR[mu*num_orbs+nu], si = SI[mu*num_orbs+nu];
           scr += sr*vr[nu] - si*vi[nu];
           sci += sr*vi[nu] + si*vr[nu];
         }
-        soc_chg[J*num_orbs+mu] += vr[mu]*scr + vi[mu]*sci;
-        if( sp == 0 ) soc_spin[J*num_orbs+mu] = vr[mu]*scr + vi[mu]*sci;
-        else soc_spin[J*num_orbs+mu] -= vr[mu]*scr + vi[mu]*sci;
+        chg[J*num_orbs+mu] += vr[mu]*scr + vi[mu]*sci;
+        if( sp == 0 ) spin[J*num_orbs+mu] = vr[mu]*scr + vi[mu]*sci;
+        else spin[J*num_orbs+mu] -= vr[mu]*scr + vi[mu]*sci;
       }
     }
   }
+}
+
+static void spinor_charge_matrix(hermetian_matrix_type overlapK, int num_orbs)
+{
+  spinor_weights(overlapK.mat,(soc_two_tables && soc_diff_zetas) ? SdnK.mat : overlapK.mat,
+                 num_orbs,vupR,vupI,vdnR,vdnI,soc_chg,soc_spin);
 }
 
 /* dense real and imaginary parts of a packed matrix of dimension n */
@@ -705,13 +850,32 @@ static void soc_postprocess(cell_type *cell, detail_type *details,
   }
 
   /* Mulliken analysis (same formulas as eval_mulliken, adding both spins) */
-  if( details->OP_mat_PRT || details->ROP_mat_PRT || details->net_chg_PRT ){
+  /* (zeta variation takes the net charges of a molecule from here, as
+     postprocess_results does without SOC) */
+  if( details->OP_mat_PRT || details->ROP_mat_PRT || details->net_chg_PRT || details->vary_zeta ||
+      details->mod_OP_mat_PRT || details->mod_ROP_mat_PRT || details->mod_net_chg_PRT ){
     real *OP = properties.OP_mat, *acc = work1;
     for(i=0;i<num_orbs;i++) acc[i] = 0.0;
     for(i=0;i<num_orbs;i++){
       for(j=0;j<num_orbs;j++){
         real sr, si;
         accumR = 0.0;
+        if( soc_two_tables && soc_diff_zetas ){
+          /* each spin part with the overlaps of its own functions */
+          real au = 0.0, ad = 0.0, srd, sid;
+          for(J=0;J<n2;J++){
+            if( soc_occ[J] == 0.0 ) continue;
+            au += soc_occ[J]*(vupR[J*num_orbs+i]*vupR[J*num_orbs+j] +
+                              vupI[J*num_orbs+i]*vupI[J*num_orbs+j]);
+            ad += soc_occ[J]*(vdnR[J*num_orbs+i]*vdnR[J*num_orbs+j] +
+                              vdnI[J*num_orbs+i]*vdnI[J*num_orbs+j]);
+          }
+          packed_get(overlapK.mat,num_orbs,i,j,&sr,&si);
+          packed_get(SdnK.mat,num_orbs,i,j,&srd,&sid);
+          OP[i*num_orbs+j] = (i != j ? 2.0 : 1.0)*(au*sr + ad*srd);
+          acc[i] += au*sr + ad*srd;
+          continue;
+        }
         for(J=0;J<n2;J++){
           if( soc_occ[J] == 0.0 ) continue;
           accumR += soc_occ[J]*(vupR[J*num_orbs+i]*vupR[J*num_orbs+j] +
@@ -735,6 +899,14 @@ static void soc_postprocess(cell_type *cell, detail_type *details,
     if( details->ROP_mat_PRT ){
       reduced_mulliken(cell->num_atoms,num_orbs,orbital_lookup_table,
                        properties.OP_mat,properties.ROP_mat);
+    }
+    /* modified Mulliken: a function of the (spin-summed) OP matrix only */
+    if( details->mod_OP_mat_PRT || details->mod_ROP_mat_PRT || details->mod_net_chg_PRT ){
+      modified_mulliken(cell,tmpset,overlapK,num_orbs,soc_occ,orbital_lookup_table,
+                        properties.OP_mat,properties.mod_OP_mat,properties.mod_net_chgs,work1);
+      if( details->mod_ROP_mat_PRT )
+        reduced_mulliken(cell->num_atoms,num_orbs,orbital_lookup_table,
+                         properties.mod_OP_mat,properties.mod_ROP_mat);
     }
   }
   if( details->OP_mat_PRT ){
@@ -784,6 +956,37 @@ static void soc_postprocess(cell_type *cell, detail_type *details,
     fprintf(output_file,";      Total moment is: %8.6lf\n",tot);
   }
 
+  if( details->mod_OP_mat_PRT ){
+    fprintf(output_file,
+            "\n\n; \t\tq-q-q-q-q-q  Modified Mulliken Analysis q-q-q-q-q-q\n");
+    fprintf(output_file,"; SOC: populations add the spin-up and spin-down parts\n");
+    fprintf(output_file,
+            "\n;    Modified Mulliken Overlap Population Matrix for %6.3lf electrons:\n",
+            cell->num_electrons);
+    print_labelled_mat(properties.mod_OP_mat,num_orbs,num_orbs,output_file,1e-5,
+                       cell->atoms,cell->num_atoms,orbital_lookup_table,
+                       num_orbs,details->mod_OP_mat_PRT & PRT_TRANSPOSE_FLAG,
+                       LABEL_BOTH,details->line_width);
+  }
+  if( details->mod_ROP_mat_PRT ){
+    fprintf(output_file,
+            "\n;   Reduced Modified Mulliken Overlap Population Matrix for %6.3lf electrons:\n",
+            cell->num_electrons);
+    print_sym_mat(properties.mod_ROP_mat,cell->num_atoms,cell->num_atoms,
+                  output_file,(char *)0,(char *)0,details->line_width);
+  }
+  if( details->mod_net_chg_PRT ){
+    fprintf(output_file,"\n;   Modified Mulliken Net Atomic Charges for %6.3lf electrons:\n",
+            cell->num_electrons);
+    tot = 0.0;
+    for(j=0;j<cell->num_atoms;j++){
+      tot += properties.mod_net_chgs[j];
+      fprintf(output_file,"%d %s: %8.6lf\n", j+1, cell->atoms[j].symb,
+              properties.mod_net_chgs[j]);
+    }
+    fprintf(output_file,";      Total Charge is: %8.6lf\n",tot);
+  }
+
   /* charge matrix: 2n spinor states x n orbitals */
   if( details->chg_mat_PRT || details->Rchg_mat_PRT ){
     fprintf(output_file,"\n\n; \t\tq-q-q-q-q-q-q-q  Charge Matrix q-q-q-q-q-q-q-q\n");
@@ -808,6 +1011,209 @@ static void soc_postprocess(cell_type *cell, detail_type *details,
     }
     fprintf(output_file,"\n;   Reduced Charge Matrix Independant of Occupation\n");
     printmat(soc_tmp,cell->num_atoms,n2,output_file,1e-5,(char)0,details->line_width);
+  }
+}
+
+/****************************************************************************
+ *
+ *                   Procedure soc_fmo
+ *
+ *   FMO (molecules) and FCO (crystals) analysis of the spinor states.  The
+ *   fragment orbitals are those of the spinless EHT hamiltonian (spin-up
+ *   table with two tables), each holding a spin-up and a spin-down
+ *   function, so the spin-up and spin-down parts of a spinor state are
+ *   transformed separately with the usual transformation.  Populations
+ *   and charge matrices add both spins, as the orbital projections do.  In
+ *   the .FMO/.FCO files every fragment orbital appears twice (spin up, spin
+ *   down) and the 2n x 2n charge matrix has the weight of each spin.
+ *
+ ****************************************************************************/
+static int open_fco_file(const char *name)
+{
+  int fd;
+#ifndef _MSC_VER
+  fd = open(name, O_RDWR | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR);
+#else
+  fd = open(name, O_RDWR | O_TRUNC | O_CREAT, _S_IREAD | _S_IWRITE);
+#endif
+  if( fd == -1 ) fatal("Can't open .FCO file for binary I/O");
+  return fd;
+}
+static real *fupR = 0, *fupI = 0, *fdnR = 0, *fdnI = 0, *fchg = 0, *fspin = 0;
+static void soc_fmo(cell_type *cell, detail_type *details, hermetian_matrix_type overlapK,
+                    hermetian_matrix_type hamilK, int num_orbs, int ik, int num_KPOINTS)
+{
+  static int fco_fd = -1;
+  int n = num_orbs, n2 = soc_dim, sp, b, J, f, g, i;
+  eigenset_type tmp;
+  const char *what = details->num_FMO_frags ? "FMO" : "FCO";
+  FMO_prop_type *P = details->FMO_props;
+
+  if( !fupR ){
+    fupR = (real *)calloc(6*n2*n,sizeof(real));
+    if( !fupR ) fatal("Can't allocate the SOC FMO arrays.");
+    fupI = fupR + n2*n; fdnR = fupI + n2*n; fdnI = fdnR + n2*n;
+    fchg = fdnI + n2*n; fspin = fchg + n2*n;
+  }
+
+  /* FCO of a crystal: fragment orbitals at this k point (molecules: driver.c) */
+  if( details->num_FCO_frags && details->Execution_Mode != MOLECULAR ){
+    build_FMO_overlap(details,n,cell->num_atoms,overlapK,orbital_lookup_table);
+    build_FMO_hamil(details,n,cell->num_atoms,hamilK,orbital_lookup_table);
+    diagonalize_FMO(details,work1,work2,work3,cmplx_hamil,cmplx_overlap,cmplx_work);
+    gen_FMO_tform_matrices(details);
+  }
+
+  /* coefficients in the fragment basis: two blocks of n states per spin part */
+  tmp.dim = n;
+  tmp.val = soc_vals;
+  for(sp=0;sp<2;sp++) for(b=0;b<2;b++){
+    tmp.vectR = (sp ? vdnR : vupR) + b*n*n;
+    tmp.vectI = (sp ? vdnI : vupI) + b*n*n;
+    tform_wavefuncs_to_FMO_basis(details,n,cell->num_atoms,tmp,orbital_lookup_table);
+    memcpy((sp ? fdnR : fupR) + b*n*n,P->eigenset.vectR,n*n*sizeof(real));
+    memcpy((sp ? fdnI : fupI) + b*n*n,P->eigenset.vectI,n*n*sizeof(real));
+  }
+  tform_hermetian_matrix_to_FMO_basis(details,n,cell->num_atoms,overlapK,work3,P->chg_mat,
+                                      P->overlap,orbital_lookup_table);
+  spinor_weights(P->overlap.mat,P->overlap.mat,n,fupR,fupI,fdnR,fdnI,fchg,fspin);
+
+  if( details->wave_fn_PRT ){
+    char transp = details->wave_fn_PRT & PRT_TRANSPOSE_FLAG;
+    fprintf(output_file,"\n;\t Spinor wavefunctions in %s basis (spinor states in rows)\n",what);
+    fprintf(output_file,";\t***> SPIN UP, REAL:\n");
+    printmat(fupR,n2,n,output_file,1e-5,transp,details->line_width);
+    fprintf(output_file,";\t***> SPIN UP, IMAGINARY:\n");
+    printmat(fupI,n2,n,output_file,1e-5,transp,details->line_width);
+    fprintf(output_file,";\t***> SPIN DOWN, REAL:\n");
+    printmat(fdnR,n2,n,output_file,1e-5,transp,details->line_width);
+    fprintf(output_file,";\t***> SPIN DOWN, IMAGINARY:\n");
+    printmat(fdnI,n2,n,output_file,1e-5,transp,details->line_width);
+    fprintf(output_file,"\n");
+  }
+  if( details->overlap_mat_PRT ){
+    fprintf(output_file,";\t\t --- Overlap Matrix in %s basis %s ---\n",what,
+            details->Execution_Mode == MOLECULAR ? "FMO_S(R)" : "FCO_S(K)");
+    printmat(P->overlap.mat,n,n,output_file,1e-4,details->overlap_mat_PRT & PRT_TRANSPOSE_FLAG,
+             details->line_width);
+  }
+  if( details->hamil_PRT ){
+    tform_hermetian_matrix_to_FMO_basis(details,n,cell->num_atoms,hamilK,work3,P->chg_mat,
+                                        P->hamil,orbital_lookup_table);
+    fprintf(output_file,";\t\t --- Hamiltonian Matrix (without SOC) in %s basis ---\n",what);
+    printmat(P->hamil.mat,n,n,output_file,1e-4,details->hamil_PRT & PRT_TRANSPOSE_FLAG,
+             details->line_width);
+  }
+
+  /* Mulliken populations in the fragment basis, both spins:
+     OP[f][g] = sum_J occ_J sum_spin Re( conj(c_f) c_g S_fg ) (x2 off the diagonal) */
+  if( details->OP_mat_PRT || details->ROP_mat_PRT ){
+    for(f=0;f<n;f++) for(g=0;g<n;g++){
+      real sr, si, acc = 0.0;
+      packed_get(P->overlap.mat,n,f,g,&sr,&si);
+      for(J=0;J<n2;J++){
+        if( soc_occ[J] == 0.0 ) continue;
+        for(sp=0;sp<2;sp++){
+          real ar = (sp ? fdnR : fupR)[J*n+f], ai = (sp ? fdnI : fupI)[J*n+f];
+          real br = (sp ? fdnR : fupR)[J*n+g], bi = (sp ? fdnI : fupI)[J*n+g];
+          acc += soc_occ[J]*((ar*br + ai*bi)*sr - (ar*bi - ai*br)*si);
+        }
+      }
+      P->OP_mat[f*n+g] = (f != g ? 2.0 : 1.0)*acc;
+    }
+    if( details->ROP_mat_PRT )
+      FMO_reduced_mulliken(details,cell->num_atoms,n,P->OP_mat,P->ROP_mat);
+  }
+  if( details->OP_mat_PRT ){
+    fprintf(output_file,"\n\n; \tq-q-q-q-q-q-q-q  Mulliken Analysis in %s basis q-q-q-q-q-q-q-q\n",what);
+    fprintf(output_file,"; SOC: populations add the spin-up and spin-down parts\n");
+    fprintf(output_file,"\n;    %s Mulliken Overlap Population Matrix for %6.3lf electrons:\n",
+            what,cell->num_electrons);
+    printmat(P->OP_mat,n,n,output_file,1e-05,details->OP_mat_PRT & PRT_TRANSPOSE_FLAG,
+             details->line_width);
+  }
+  if( details->ROP_mat_PRT ){
+    fprintf(output_file,"\n;   Reduced %s Mulliken Overlap Population Matrix for %6.3lf electrons:\n",
+            what,cell->num_electrons);
+    print_sym_mat(P->ROP_mat,details->num_FMO_frags ? details->num_FMO_frags : details->num_FCO_frags,
+                  details->num_FMO_frags ? details->num_FMO_frags : details->num_FCO_frags,
+                  output_file,(char *)0,(char *)0,details->line_width);
+  }
+  if( details->chg_mat_PRT || details->Rchg_mat_PRT )
+    fprintf(output_file,"\n\n# \tq-F-q-F-q-F-q-F  Charge Matrix in %s basis F-q-F-q-F-q-F-q\n",what);
+  if( details->chg_mat_PRT ){
+    fprintf(output_file,";  Complete %s Charge Matrix Independant of Occupation\n",what);
+    fprintf(output_file,"; SOC: %d spinor states (rows), spin-up + spin-down weight of each fragment orbital\n",n2);
+    printmat(fchg,n2,n,output_file,1e-05,details->chg_mat_PRT & PRT_TRANSPOSE_FLAG,
+             details->line_width);
+  }
+
+  /* .FMO file (molecules): spinor energies with occupations and the charge
+     matrix with the weight of each spin (columns f up, f down, ...) */
+  if( details->num_FMO_frags && details->Execution_Mode == MOLECULAR ){
+    fprintf(FMO_file,"; Molecular orbital energies (spinor states) and occupations\n");
+    for(J=0;J<n2;J++) fprintf(FMO_file,"%lg %lg\n",soc_vals[J],soc_occ[J]);
+    fprintf(FMO_file,"; charge matrix (columns: each fragment orbital spin up, spin down)\n");
+    for(J=0;J<n2;J++){
+      for(f=0;f<n;f++){
+        real c = fchg[J*n+f], m = fspin[J*n+f];
+        real up = 0.5*(c+m), dn = 0.5*(c-m);
+        fprintf(FMO_file,"%6.4lg %6.4lg ",fabs(up) >= 1e-6 ? up : 0.0,fabs(dn) >= 1e-6 ? dn : 0.0);
+      }
+      fprintf(FMO_file,"\n");
+    }
+  }
+
+  /* .FCO file (crystals), the binary layout read by fit_FCO, doubled */
+  if( details->num_FCO_frags ){
+    int nfo2;
+    if( fco_fd < 0 ){
+      char name[600];
+      int test_int = 4231, nf = details->num_FCO_frags;
+      real tot_K_weight = 0.0;
+      sprintf(name,"%s.FCO",details->filename);
+      fco_fd = open_fco_file(name);
+      for(i=0;i<details->num_KPOINTS;i++) tot_K_weight += details->K_POINTS[i].weight;
+      write(fco_fd,(const char *)&test_int,sizeof(int));
+      write(fco_fd,(const char *)&(details->num_KPOINTS),sizeof(int));
+      write(fco_fd,(const char *)&tot_K_weight,sizeof(real));
+      write(fco_fd,(const char *)&n2,sizeof(int));
+      write(fco_fd,(const char *)&nf,sizeof(int));
+      for(i=0;i<nf;i++){
+        nfo2 = 2*details->FMO_frags[i].num_orbs;
+        write(fco_fd,(const char *)&nfo2,sizeof(int));
+      }
+    }
+    write(fco_fd,(const char *)soc_vals,n2*sizeof(real));
+    for(i=0;i<details->num_FCO_frags;i++){
+      for(f=0;f<details->FMO_frags[i].num_orbs;f++){
+        write(fco_fd,(const char *)&(details->FMO_frags[i].eigenset.val[f]),sizeof(real));
+        write(fco_fd,(const char *)&(details->FMO_frags[i].eigenset.val[f]),sizeof(real));
+      }
+    }
+    for(J=0;J<n2;J++){
+      for(f=0;f<n;f++){
+        real c = fchg[J*n+f], m = fspin[J*n+f], w[2];
+        w[0] = 0.5*(c+m); w[1] = 0.5*(c-m);
+        write(fco_fd,(const char *)w,2*sizeof(real));
+      }
+    }
+    if( ik == num_KPOINTS-1 && details->walsh_details.num_steps <= 1 ){
+      close(fco_fd); fco_fd = -1;
+    }
+  }
+
+  /* keep the fragment coefficients and charge matrix for the average
+     properties (projected DOS, occupations and COOPs on fragment orbitals) */
+  if( details->avg_props && avg_prop_info ){
+    avg_prop_info_type *api = &(avg_prop_info[ik]);
+    for(i=0;i<n2*n;i++){
+      api->FMO_orbs[i] = (float)fupR[i];
+      api->FMO_orbsI[i] = (float)fupI[i];
+      api->FMO_orbs_dn[i] = (float)fdnR[i];
+      api->FMO_orbsI_dn[i] = (float)fdnI[i];
+      api->FMO_chg_mat[i] = (float)fchg[i];
+    }
   }
 }
 
@@ -844,7 +1250,8 @@ void soc_kpoint(cell_type *cell, detail_type *details, int ik, int num_KPOINTS,
   char name[600];
   int j, mu, n2 = soc_dim, want_vectors;
 
-  build_spinor(hamilK,overlapK,num_orbs);
+  build_spinor(hamilK,overlapK,num_orbs,
+               details->Execution_Mode == MOLECULAR ? (k_point_type *)0 : &(details->K_POINTS[ik]));
 
   if( details->overlap_mat_PRT )
     print_spinor_matrix(details->Execution_Mode == MOLECULAR ? "Spinor overlap S(R)" :
@@ -869,6 +1276,20 @@ void soc_kpoint(cell_type *cell, detail_type *details, int ik, int num_KPOINTS,
     dump_hermetian_mat(soc_ham_file,Hs,soc_dim);
     if( ik == num_KPOINTS-1 ){ close(soc_ham_file); soc_ham_file = -1; }
   }
+  if( details->dump_sparse_mats ){
+    /* same text format as without SOC, spinor matrices of dimension 2n */
+    static FILE *sp_ov = 0, *sp_ham = 0;
+    if( ik == 0 ){
+      sprintf(name,"%s.SPARSE.OV",details->filename);
+      sp_ov = fopen(name,"w+");
+      sprintf(name,"%s.SPARSE.HAM",details->filename);
+      sp_ham = fopen(name,"w+");
+      if( !sp_ov || !sp_ham ) fatal("Can't open the .SPARSE.OV/.SPARSE.HAM files.");
+    }
+    dump_sparse_mat(sp_ov,Ss,soc_dim,1e-08);
+    dump_sparse_mat(sp_ham,Hs,soc_dim,1e-08);
+    if( ik == num_KPOINTS-1 ){ fclose(sp_ov); fclose(sp_ham); sp_ov = sp_ham = 0; }
+  }
   if( details->just_matrices ) return;
 
   want_vectors = !details->just_avgE;
@@ -878,10 +1299,19 @@ void soc_kpoint(cell_type *cell, detail_type *details, int ik, int num_KPOINTS,
     extract_vectors(num_orbs);
     spinor_charge_matrix(overlapK,num_orbs);
     soc_postprocess(cell,details,overlapK,num_orbs);
+    if( details->num_FMO_frags || details->num_FCO_frags )
+      soc_fmo(cell,details,overlapK,hamilK,num_orbs,ik,num_KPOINTS);
+    if( details->num_MOs_to_print != 0 ){
+      /* .MO file for viewkel: print_MOs takes the spinor states from soc.c */
+      eigenset_type noset;
+      memset(&noset,0,sizeof(noset));
+      print_MOs(details,num_orbs,noset,ik,unique_atoms,num_unique_atoms,
+                cell->num_atoms,orbital_lookup_table);
+    }
   }
 
   /* keep the states for the average properties */
-  if( details->avg_props && avg_prop_info && details->Execution_Mode != MOLECULAR ){
+  if( details->avg_props && avg_prop_info ){
     avg_prop_info_type *api = &(avg_prop_info[ik]);
     for(j=0;j<n2;j++) api->energies[j] = (float)soc_vals[j];
     if( want_vectors ){
@@ -900,9 +1330,9 @@ void soc_kpoint(cell_type *cell, detail_type *details, int ik, int num_KPOINTS,
 
 /* SOC eigenvalues of one band structure k point (from the spinless H(k),S(k)) */
 real *soc_band_energies(detail_type *details, hermetian_matrix_type hamilK,
-                        hermetian_matrix_type overlapK, int num_orbs)
+                        hermetian_matrix_type overlapK, int num_orbs, k_point_type *kpoint)
 {
-  build_spinor(hamilK,overlapK,num_orbs);
+  build_spinor(hamilK,overlapK,num_orbs,kpoint);
   diag_spinor(details,0);
   return soc_vals;
 }
@@ -913,6 +1343,64 @@ real soc_state_energy(int J)
 {
   if( J < 0 || J >= soc_dim ) fatal("Walsh: SOC state number out of range.");
   return soc_vals[J];
+}
+/* sum of occupation x energy of the spinor states of the last diagonalization
+   (the molecule): the extended Hueckel energy used by eval_electrostatics */
+real soc_occupied_energy(void)
+{
+  int J;
+  real e = 0.0;
+  for(J=0;J<soc_dim;J++) e += soc_occ[J]*soc_vals[J];
+  return e;
+}
+/* coefficients of spinor state J (spin-up part ur+i ui, spin-down part dr+i di,
+   n each) with the global phase fixed: the largest coefficient (over both
+   spins) is real and positive.  Used for the .MO file of viewkel, which draws
+   the real part. */
+void soc_state_vector(int J, real *ur, real *ui, real *dr, real *di)
+{
+  int n = soc_dim/2, mu, best = 0;
+  real big = -1.0, pr, pi, m;
+  if( J < 0 || J >= soc_dim ) fatal("SOC state number out of range.");
+  for(mu=0;mu<2*n;mu++){
+    int k = J*n + (mu % n);
+    real a = mu < n ? vupR[k] : vdnR[k], b = mu < n ? vupI[k] : vdnI[k];
+    if( a*a + b*b > big + 1e-12 ){ big = a*a + b*b; best = mu; }
+  }
+  {
+    int k = J*n + (best % n);
+    real a = best < n ? vupR[k] : vdnR[k], b = best < n ? vupI[k] : vdnI[k];
+    m = sqrt(a*a + b*b);
+    pr = m > 0 ? a/m : 1.0;    /* multiply by conj(phase) */
+    pi = m > 0 ? b/m : 0.0;
+  }
+  for(mu=0;mu<n;mu++){
+    int k = J*n + mu;
+    ur[mu] = vupR[k]*pr + vupI[k]*pi;  ui[mu] = vupI[k]*pr - vupR[k]*pi;
+    dr[mu] = vdnR[k]*pr + vdnI[k]*pi;  di[mu] = vdnI[k]*pr - vdnR[k]*pi;
+  }
+}
+
+/* reduced charge matrix element: weight of atom 'atom in spinor state J */
+real soc_rchg_element(int atom, int J)
+{
+  int n = soc_dim/2, mu, begin, end;
+  real t = 0.0;
+  if( J < 0 || J >= soc_dim || atom < 0 || atom >= unit_cell->num_atoms )
+    fatal("Walsh: SOC reduced charge matrix element out of range.");
+  find_atoms_orbs(n,unit_cell->num_atoms,atom,orbital_lookup_table,&begin,&end);
+  if( begin >= 0 ) for(mu=begin;mu<end;mu++) t += soc_chg[J*n+mu];
+  return t;
+}
+/* modulus of the coefficient of AO mu in spinor state J, both spins:
+   sqrt(|c_up|^2 + |c_down|^2).  Unlike the coefficient itself it does not
+   depend on the basis LAPACK picks inside a Kramers pair. */
+real soc_coeff_modulus(int J, int mu)
+{
+  int n = soc_dim/2, k = J*(soc_dim/2)+mu;
+  if( J < 0 || J >= soc_dim || mu < 0 || mu >= n )
+    fatal("Walsh: SOC coefficient out of range.");
+  return sqrt(vupR[k]*vupR[k] + vupI[k]*vupI[k] + vdnR[k]*vdnR[k] + vdnI[k]*vdnI[k]);
 }
 real soc_chg_element(int J, int mu)
 {

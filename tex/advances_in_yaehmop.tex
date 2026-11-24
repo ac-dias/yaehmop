@@ -113,11 +113,15 @@ $H(\mathbf{k})$, $S(\mathbf{k})$ in the usual \texttt{.HAM}/\texttt{.OV} binary 
 a text file with $\Hsoc$. The spinor eigenvectors go through the usual property code, so
 the Fermi level, total and projected DOS, COOP/COHP, Mulliken populations, net charges,
 charge matrices, wave functions, charge iteration and Walsh diagrams work with SOC, for
-crystals, molecules and in THIN mode (bands). Spin moments $m_z$ per atom are printed.
+crystals, molecules and in THIN mode (bands), and so does every other option (FMO/FCO,
+\texttt{MO print}, zeta variation, modified Mulliken, sparse dumps, electrostatics, netCDF,
+spin-resolved projected DOS; Section~\ref{sec:soclimits}). Spin moments $m_z$ per atom are
+printed.
 
 \item[SOC with two spin tables (\opt{--soc} with \opt{--parm-up/--parm-down})]
 One calculation with $H_{\mathrm{sp}}=\mathrm{diag}(H^\uparrow,H^\downarrow)+\Hsoc$; the
-tables may differ in $H_{ii}$ (and $K$), not in the zetas.
+tables may differ in $H_{ii}$, $K$ and the zetas ($S_{\mathrm{sp}}=\mathrm{diag}(S^\uparrow,S^\downarrow)$);
+charge iteration and zeta variation change both tables alike.
 
 \item[viewkel]
 Reading a file whose name has \texttt{\_up.} also reads its \texttt{\_down.} partner and
@@ -172,7 +176,8 @@ tightbind/avg\_props.c & modified & same, for the crystal occupations and averag
 tightbind/DOS\_stuff.c & modified & ``states are present'' counts use \var{max\_occup}; $2n$ states; fix of the $k$ weights of the projected DOS \\
 tightbind/genutil.c    & modified & electron-count sanity check uses \var{max\_occup}; double-zeta $p$ in the \texttt{.MO} file \\
 tightbind/electrostat.c, tightbind/muller.c, tightbind/zetas.c & modified & double-zeta $p$ in the molecular electrostatics, the Muller iteration and the zeta variation (Section~\ref{sec:pdzpost}) \\
-tightbind/netCDF\_support.c & modified & double-zeta $p$ in the atomic parameters; old defects fixed (Section~\ref{sec:pdzpost}) \\
+tightbind/netCDF\_support.c & modified & double-zeta $p$ in the atomic parameters; old defects fixed (Section~\ref{sec:pdzpost}); SOC states, one $k$ point at a time \\
+tightbind/FMO\_stuff.c, tightbind/DOS\_stuff.c, tightbind/COOP\_stuff.c, tightbind/avg\_props.c, tightbind/walsh.c, tightbind/mulliken.c & modified & SOC: fragment orbitals with spin, spin-resolved projected DOS, spin-down overlaps and fragment coefficients, Walsh items; old defects (Sections~\ref{sec:soclimits}, \ref{sec:fixes}) \\
 tightbind/CMakeLists.txt,\newline tightbind/Makefile,\newline tightbind/makefile.linux & modified & \file{soc.c}, \file{spin.c} added to the sources \\
 viewkel/band\_graphs.c,\newline viewkel/prop\_graphs.c,\newline viewkel/genutil.c, viewkel/interface.c,\newline viewkel/graph\_objects.h, viewkel/prototypes.h & modified & both spin channels in one band or property graph; Fermi level from the \texttt{.spin} summary (Section~\ref{sec:viewkel}) \\
 viewkel/fit\_orbs.c & modified & reads the double-zeta $p$ of the \texttt{.MO} file for MO surfaces and contours \\
@@ -284,11 +289,12 @@ Some existing keywords are interpreted differently in the new modes:
   \opt{--const-up/--const-down} when those are given.
 \item \texttt{Dump Hamil} / \texttt{Dump Overlap}: in a spin-polarized run each channel
   writes its own files. With SOC the files hold the $2n\times2n$ spinor matrices.
-\item Keywords for the few properties that are not implemented with SOC (FMO/FCO,
-  \texttt{MO print} for viewkel, zeta variation, modified Mulliken analysis, sparse
-  dumps, the molecular electrostatic energy, netCDF, and the Walsh items that follow one
-  MO coefficient) stop a SOC run with a message naming the keyword. Charge iteration
-  stops a spin-polarized run and a SOC run with two spin tables.
+\item Every keyword works with SOC (Section~\ref{sec:soclimits}). New keyword
+  \texttt{Spin Resolved DOS}: with SOC each orbital or atom projected DOS curve is followed
+  by its spin-up and spin-down parts. Charge iteration stops a spin-polarized run (two
+  processes); with SOC and two spin tables it works, the Muller iteration is refused, and
+  with different zetas in the tables FMO/FCO, \texttt{MO print} and the molecular
+  electrostatic energy are refused.
 \item \texttt{Projected DOS}, \texttt{COOP} and the printing options work with SOC.
   Orbital and atom numbers keep their spinless meaning: a projection on an orbital adds
   its spin-up and spin-down parts. Energy levels, charge matrices and Walsh orbital
@@ -806,11 +812,8 @@ soc\_state\_energy(J), soc\_chg\_element(J, $\mu$) & spinor energies and charge-
 
 \paragraph{\fn{soc\_setup}.}
 \begin{enumerate}
-\item Refuses what is not implemented with SOC yet, naming the offending option (macro
-  \texttt{SOC\_REFUSE}): FMO/FCO, \texttt{MO print}, zeta variation, modified Mulliken
-  analysis, sparse dumps, the molecular electrostatic energy, netCDF, and the Walsh items
-  that follow single MO coefficients. It also requires a LAPACK build.
-\item With \opt{--parm-down} (SOC with two spin tables) reads the spin-down $H_{ii}$
+\item Requires a LAPACK build.
+\item With \opt{--parm-down} (SOC with two spin tables) reads the spin-down table
   (\fn{soc\_setup\_two\_tables}, Section~\ref{sec:socspin}).
 \item Reads the SOC file (\fn{read\_soc\_file}), sets \var{max\_occup} $=1$ and
   \var{num\_spin\_comp} $=2$, and allocates the dense $\Hsoc$ (\var{socR}, \var{socI},
@@ -942,14 +945,57 @@ The tests check this with $\lambda=0$ (every property equals the spinless one, t
 twice the states) and with the MoS$_2$ parameters, where the average net charges agree
 with an independent numpy calculation from the spinor eigenvectors to $4\times10^{-7}$.
 
-\subsection{What is not done with SOC yet}\label{sec:soclimits}
+\subsection{The other options with SOC}\label{sec:soclimits}
 
-FMO/FCO analysis (the fragment orbitals would be spinless and the crystal orbitals
-spinors; the \texttt{.FMO} file and its viewkel reader would have to change), the
-\texttt{.MO} files for viewkel contour plots (spinors are complex two-component
-functions), zeta variation, modified Mulliken analysis, sparse dumps, the molecular
-electrostatic energy and netCDF. They stop the program with a message naming the
-option.
+Every option of the program works with SOC. Those that were refused at first:
+\begin{description}[style=nextline,leftmargin=1.2em]
+\item[Modified Mulliken analysis, sparse dumps] The modified populations are a function of
+  the (spin-summed) overlap population matrix, so \fn{soc\_postprocess} calls
+  \fn{modified\_mulliken} on it. \fn{soc\_kpoint} writes the spinor $H$ and $S$
+  ($2n\times2n$) to \texttt{.SPARSE.HAM}/\texttt{.SPARSE.OV} with \fn{dump\_sparse\_mat},
+  which reads the same packed layout.
+\item[Molecules: average properties, electrostatic energy, zeta variation] The spinor
+  states of a molecule are stored for the average properties as for a crystal. The
+  extended Hückel energy of \fn{eval\_electrostatics} is the sum over the $2n$ spinor
+  levels (\fn{soc\_occupied\_energy}); the rest of the electrostatic model does not
+  depend on the states. The net charges of the zeta variation come from the spin-summed
+  Mulliken analysis.
+\item[Walsh items with MO coefficients] \texttt{reduced charge mat walsh} now takes an atom
+  and an MO (the matrix is atoms$\times$MOs; the original read it with a stride of
+  \var{num\_atoms}, Section~\ref{sec:fixes}). The coefficient of a spinor state is not
+  defined inside a Kramers pair (LAPACK returns any basis of the pair), but the spin-summed
+  weight is: with $\phi=a\psi+b\Theta\psi$, $\Theta\psi=(-d^*,u^*)$ for $\psi=(u,d)$, the cross
+  terms of $|\phi_{\uparrow\mu}|^2+|\phi_{\downarrow\mu}|^2$ cancel. \texttt{wave func walsh} and
+  \texttt{orbital coeff walsh} give $\sqrt{|c_{\uparrow\mu}|^2+|c_{\downarrow\mu}|^2}$ with SOC.
+\item[\texttt{MO print}] Each printed spinor state appears twice in the \texttt{.MO} file,
+  spin-up part then spin-down part, with \texttt{Re Im} per AO; the global phase is fixed
+  so that the largest coefficient is real and positive (\fn{soc\_state\_vector}), since
+  viewkel draws the real part. viewkel reads the file unchanged.
+\item[FMO/FCO] The fragment orbitals are those of the spinless hamiltonian, each holding
+  spin up and spin down; the spin-up and spin-down parts of a spinor state are transformed
+  separately with the usual transformation (\fn{soc\_fmo}), populations and charge matrices
+  in the fragment basis add both spins (\fn{spinor\_weights} with $S$ in the fragment
+  basis). In the \texttt{.FMO} file (header ``with occupations'') and the \texttt{.FCO}
+  file every fragment orbital appears twice with half of its occupation, the $2n$ states
+  come with their occupations and the $2n\times2n$ charge matrix has the weight of each
+  spin, so viewkel (which then fills levels from the occupations, not by pairs) and
+  \file{fit\_FCO} read them unchanged. \fn{diagonalize\_FMO} fills the spinless fragment
+  orbitals with two electrons (\var{max\_occup} is 1 with SOC). Fragment projected DOS and
+  fragment COOPs use the stored spin-down coefficients (\var{FMO\_orbs\_dn}).
+\item[netCDF] Energies and coefficients of the $2n$ states (dimension
+  \texttt{num\_spinor\_states}), spin-down part in \texttt{Crystal\_Orbitals\_downR/I}.
+\item[Spin-resolved projected DOS] With \texttt{Spin Resolved DOS}, \fn{gen\_projected\_DOS}
+  writes after each orbital or atom curve its spin-up and spin-down parts, from
+  \var{chg\_mat} $\pm$ \var{chg\_spin} (the up minus down weight already kept for the spin
+  moments).
+\end{description}
+Checks (CO$_2$, XeF$_4$, diamond, bcc Fe; $\lambda=0$ against the spinless run): modified
+Mulliken matrices and charges, electrostatic energy, average net charges, zeta variation and
+FMO populations identical; sparse dumps $=\mathrm{diag}(M,M)$ ($+\Hsoc$ for $\lambda\ne0$);
+\texttt{.MO}: $c^\dagger Sc=1$ to the printed digits, state 1 is the spinless MO 1 with spin
+up; \texttt{.FMO}/\texttt{.FCO}: per-level weights twice the spinless ones; netCDF energies
+twice and group weights twice the spinless; spin-resolved projected DOS: up $+$ down $=$
+total, and with two spin tables equal to the curves of the two channels.
 
 %=====================================================================
 \section{SOC on top of two spin channels}\label{sec:socspin}
@@ -961,29 +1007,52 @@ bind --soc soc.dat --parm-up up.dat --parm-down down.dat [--const-up K1 --const-
 gives one calculation (one process, outputs without suffix) with
 \begin{equation}
 H_{\mathrm{sp}}(\mathbf{k}) = \begin{pmatrix} H^\uparrow(\mathbf{k}) & 0\\ 0 & H^\downarrow(\mathbf{k})\end{pmatrix} + \Hsoc,
-\qquad S_{\mathrm{sp}}(\mathbf{k}) = I_2\otimes S(\mathbf{k}),
+\qquad S_{\mathrm{sp}}(\mathbf{k}) = \begin{pmatrix} S^\uparrow(\mathbf{k}) & 0\\ 0 & S^\downarrow(\mathbf{k})\end{pmatrix},
 \end{equation}
-a collinear magnetic model along $z$ plus spin--orbit coupling. The overlap must be the
-same in both channels, so the two tables may differ only in $H_{ii}$; the program stops
-if the basis or a zeta differs. The electron count is that of the input, with one Fermi
-level for all $2n$ states (\opt{--nelec-*} and \opt{--common-fermi} do not apply).
+a collinear magnetic model along $z$ plus spin--orbit coupling. The two tables must have
+the same shells; $H_{ii}$, $K$ and the zetas may differ. With the same zetas
+$S^\uparrow=S^\downarrow$ ($S_{\mathrm{sp}}=I_2\otimes S$). With different zetas each channel keeps its
+own functions: a spin-up and a spin-down function are orthogonal whatever their radial
+parts, so the off-diagonal blocks of $S_{\mathrm{sp}}$ vanish and no overlap between
+different radial functions is needed. The on-site $\lambda$ is used as it is: it is a
+fitted parameter, and the radial overlap of the up and down functions of a shell is
+absorbed in it. The electron count is that of the input, with one Fermi level for all $2n$
+states (\opt{--nelec-*} and \opt{--common-fermi} do not apply).
 
 \paragraph{Implementation.} In EHT, $H(\mathbf{k})$ is the elementwise product of a fixed
 matrix $h_{ij}$ (the $H_{ii}$ on the diagonal and $K(H_{ii}+H_{jj})/2$, or the weighted
 formula, off it) with $S(\mathbf{k})$; \fn{full\_R\_space\_Hamiltonian} builds $h$ and
 \fn{build\_k\_hamil\_FAT} does the product. \fn{soc\_setup\_two\_tables} reads the
-spin-down table with \fn{fill\_atomic\_parms} into a copy of the atoms (special atoms of
-the input keep their parameters in both channels), checks the zetas and keeps the
-spin-down $H_{ii}$. Each time \file{driver.c} builds $h^\uparrow$ it calls
-\fn{soc\_build\_down\_hamiltonian}, which swaps in the spin-down $H_{ii}$ and $K$, calls
-\fn{full\_R\_space\_Hamiltonian} for $h^\downarrow$ and swaps back. \fn{build\_spinor}
-takes the spin-down block from $h^\downarrow\circ S(\mathbf{k})$. Everything else
+spin-down table with \fn{fill\_atomic\_parms} into \var{dn\_atoms} (atoms with parameters in
+the input, \texttt{*} or the same symbol, keep them in both channels), checks the shells and
+notes whether the zetas differ. Each time \file{driver.c} builds $h^\uparrow$ it calls
+\fn{soc\_build\_down\_hamiltonian}, which exchanges the EHT parameters of the atoms with
+those of \var{dn\_atoms} (\fn{swap\_parms}: $H_{ii}$, exponents and contraction
+coefficients, so positions stay current) and the $K$, builds $S^\downarrow(\mathbf{R})$
+(different zetas; \file{memory.c} then keeps the overlaps in $\mathbf{R}$ space) and
+$h^\downarrow$, and exchanges back. \fn{build\_spinor} takes the spin-down block from
+$h^\downarrow\circ S^\downarrow(\mathbf{k})$. With different zetas the charge matrix
+(\fn{spinor\_weights}), the Mulliken populations, the COOP (\fn{eval\_COOP\_spin}) and the
+average overlap populations (\fn{calc\_avg\_OP}) use the overlaps of each spin
+(\fn{soc\_down\_overlap\_R}); FMO/FCO, \texttt{MO print} and the molecular electrostatic
+energy, which need one set of functions per atom, are refused. Everything else
 (properties, dumps, bands) is the SOC code of the previous section, so the spin moments
 give the magnetization.
 
+\paragraph{Charge iteration and zeta variation.} After each step \fn{soc\_follow\_down}
+gives the spin-down table the same change of $H_{ii}$ and of the exponents as the spin-up
+one (contractions renormalized), so the difference between the tables, the exchange
+splitting, is kept; the \texttt{.out} lists the spin-down parameters. The Muller iteration
+is refused: it replaces the table parameters by its own spin-independent functions when
+the input is read.
+
 \paragraph{Checks.} With $\lambda=0$ the bands are exactly the bands of the two spin
-channels together, and the Fermi level, average energy and spin moment equal those of a
-spin-polarized run with \opt{--common-fermi} (Fe: $1.892\,\mu_B$ in both).
+channels together, and the Fermi level, average energy, spin moment and the projected DOS
+of each channel equal those of a spin-polarized run with \opt{--common-fermi}, with the
+same zetas and with the different zetas of the fitted Fe tables (Fe: $E_F=-14.376729$ eV,
+$1.964\,\mu_B$ in both). Charge iteration of CO$_2$ with two equal tables gives the
+spinless charges; with different tables the final $H_{ii}^\downarrow-H_{ii}^\uparrow$ is the
+difference of the tables ($-0.3000$ and $+0.5000$ eV) and the spin-down zeta is kept.
 
 %=====================================================================
 \section{The $K$ of the diagonal term: \texttt{THE CONST DIAG}}\label{sec:kdiag}
@@ -1213,6 +1282,27 @@ showed up because with SOC every level is (Kramers) degenerate.
 
 \paragraph{COOP curves of a spin channel.} See Section~\ref{sec:spinocc}.
 
+\paragraph{Found while adding the options of Section~\ref{sec:soclimits}.}
+\begin{itemize}
+\item \file{fileio.c}, \fn{parse\_charge\_iteration}: \var{numbers\_read} was not
+  initialized and \fn{parse\_integer\_string} frees a non-null pointer, so every
+  \texttt{Charge Iteration} block with a \texttt{vary} list crashed.
+\item \file{memory.c}, \fn{my\_realloc}: \texttt{calloc} of the new size followed by a
+  \texttt{bcopy} of the new size from the old (smaller) block read past its end; it now
+  calls \texttt{realloc}. It showed up with charge iteration, where the list of unique atoms
+  grows at every step.
+\item \file{mulliken.c}, \fn{calc\_occupations}: the loops that look for the degeneracy of
+  the HOMO tested the eigenvalue before the index, reading \texttt{val[num\_orbs]}, and
+  \texttt{val[-1]} without electrons.
+\item \file{walsh.c}: the reduced charge matrix (atoms$\times$MOs) was read with a stride of
+  \var{num\_atoms} and the input asked for two atoms; the item is now ``atom $A$ in MO $M$''.
+\item \file{netCDF\_support.c}: energies and coefficients of all $k$ points were written
+  from the arrays of the first one (each $k$ point has its own), reading past them; the
+  prototype of \fn{netCDF\_write\_MOs} was missing.
+\item \file{memory.c}: the overlap population matrix was not allocated when only the
+  modified Mulliken analysis was asked for.
+\end{itemize}
+
 \paragraph{viewkel.} Section~\ref{sec:viewkel}.
 
 %=====================================================================
@@ -1396,9 +1486,17 @@ COOP of a channel & same tables: COOP curves and average COOPs of a channel are 
 the spinless ones. \\
 SOC + spin & Fe with the down $H_{ii}$ and the up zetas, $\lambda=0$: bands are the two
 channels together (difference 0), Fermi level and moment equal the common-Fermi spin run;
-$\lambda=0.06$ eV changes the moment a little; different zetas are refused. \\
+$\lambda=0.06$ eV changes the moment a little; with the different zetas of the fitted
+tables, bands, Fermi level and moment equal the common-Fermi spin run. \\
+SOC options & CO$_2$, $\lambda=0$: electrostatic and EHT energies, modified Mulliken, average
+net charges, zeta variation equal the spinless run; sparse dumps of spinor dimension;
+\texttt{.MO} with $4n$ blocks, state 1 = MO 1 spin up; Walsh reduced charge and
+$|$coefficient$|$ of MO 1. XeF$_4$: FMO populations; \texttt{.FMO} with occupations. Diamond:
+\texttt{.FCO} doubled, weights twice the spinless. Fe: spin-resolved projected DOS. CO$_2$:
+charge iteration with two spin tables. \\
 errors & \opt{--parm-up} without \opt{--parm-down}; SOC + spin with \opt{--nelec-up};
-\opt{--common-fermi} without tables; SOC with FMO (message names FMO). \\
+\opt{--common-fermi} without tables; Muller iteration with two spin tables; FMO with two
+tables of different zetas. \\
 \bottomrule
 \end{longtable}
 
@@ -1757,11 +1855,8 @@ The changes are independent enough to be reviewed in three steps:
 
 \subsection{Open items}\label{sec:todo}
 \begin{itemize}
-\item SOC: FMO/FCO, \texttt{.MO} files for viewkel, zeta variation, modified Mulliken,
-  sparse dumps, molecular electrostatics, netCDF (Section~\ref{sec:soclimits}); spin-resolved
-  (up/down) projected DOS of a SOC run.
-\item SOC with two spin tables: charge iteration; different zetas per channel (would need
-  the spin-up/spin-down overlap of different radial functions).
+\item SOC with two spin tables: Muller iteration; with different zetas, FMO/FCO,
+  \texttt{MO print} and the molecular electrostatic energy (Section~\ref{sec:socspin}).
 \item viewkel: the remaining old defects listed in Section~\ref{sec:viewkel}.
 \item yaehmop-bandfit: use the new \texttt{bind} directly (spinor \texttt{.HAM}, the
   \texttt{\_up}/\texttt{\_down} outputs and \texttt{.spin}).

@@ -358,15 +358,22 @@ extern int soc_active PROTO((void));
 extern int soc_num_states PROTO((void));
 extern real soc_state_energy PROTO((int));
 extern real soc_chg_element PROTO((int, int));
+extern real soc_occupied_energy PROTO((void));
+extern real soc_rchg_element PROTO((int, int));
+extern real soc_coeff_modulus PROTO((int, int));
+extern void soc_state_vector PROTO((int, real *, real *, real *, real *));
 extern void soc_setup PROTO((cell_type *, detail_type *, int, int *));
 extern void soc_kpoint PROTO((cell_type *, detail_type *, int, int,
                               hermetian_matrix_type, hermetian_matrix_type, int));
 extern void soc_build_down_hamiltonian PROTO((cell_type *, detail_type *,
-                                              hermetian_matrix_type, int, int *));
+                                              hermetian_matrix_type, int, int *, int));
+extern void soc_follow_down PROTO((cell_type *));
+extern real *soc_down_overlap_R PROTO((void));
+extern int soc_needs_R_overlaps PROTO((void));
 extern void soc_print_spin_moments PROTO((detail_type *, cell_type *, int,
                                           K_orb_ptr_type *, avg_prop_info_type *));
 extern real *soc_band_energies PROTO((detail_type *, hermetian_matrix_type,
-                                      hermetian_matrix_type, int));
+                                      hermetian_matrix_type, int, k_point_type *));
 /* spin.c (adias-dev) */
 extern void spin_exchange_fermi PROTO((detail_type *, cell_type *, int, K_orb_ptr_type *));
 extern void spin_send_summary PROTO((cell_type *, detail_type *, prop_type *));
@@ -386,6 +393,8 @@ extern void netCDF_init_file PROTO((detail_type * details, cell_type *cell,
 extern void netCDF_close_file PROTO((detail_type * details));
 extern void netCDF_write_Es PROTO((detail_type * details, int num_orbs,
                                    avg_prop_info_type *prop_info));
+extern void netCDF_write_MOs PROTO((detail_type * details, int num_orbs,
+                                    avg_prop_info_type *prop_info));
 
 #endif
 

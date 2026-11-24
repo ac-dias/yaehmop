@@ -308,55 +308,77 @@ void netCDF_init_file(detail_type *details,cell_type *cell,int num_orbs,
 void netCDF_write_MOs(detail_type *details,int num_orbs,
                       avg_prop_info_type *prop_info)
 {
-  int orbR_ID;
-  int orbI_ID;
+  int orbR_ID,orbI_ID,dnR_ID=0,dnI_ID=0,state_dim_ID;
   int dim_array[10]={0},count_array[10]={0};
   size_t start_buf[10],count_buf[10];
   size_t cell_dim;
+  int k,nstates,soc;
 
   /* read out the dimension */
   TRY_CDF(nc_inq_dimlen(details->netCDF_info->file_ID,
                         details->netCDF_info->num_dim_ID,
                         (size_t *)&cell_dim));
-  /****
-    "allocate" the variables
-  ****/
+  /* SOC: 2n spinor states x n orbitals, spin-up part in Crystal_Orbitals,
+     spin-down part in Crystal_Orbitals_down, always complex */
+  soc = soc_active();
+  nstates = soc ? soc_num_states() : num_orbs;
 
   /* switch to definition mode */
   TRY_CDF(nc_redef(details->netCDF_info->file_ID));
+  if( soc ){
+    if( nc_inq_dimid(details->netCDF_info->file_ID,"num_spinor_states",&state_dim_ID) != NC_NOERR )
+      TRY_CDF(nc_def_dim(details->netCDF_info->file_ID,"num_spinor_states",
+                         (size_t)nstates,&state_dim_ID));
+  } else state_dim_ID = details->netCDF_info->num_orbs_ID;
 
   /* coefficient arrays */
   dim_array[0] = details->netCDF_info->num_KPOINTS_ID;
-  dim_array[1] = details->netCDF_info->num_orbs_ID;
+  dim_array[1] = state_dim_ID;
   dim_array[2] = details->netCDF_info->num_orbs_ID;
   TRY_CDF(nc_def_var(details->netCDF_info->file_ID,
                      "Crystal_OrbitalsR",NC_FLOAT,
                      3,(int *)dim_array,&orbR_ID));
   /* only write imaginary coefficients if they are required */
-  if( cell_dim > 0 ){
+  if( cell_dim > 0 || soc ){
     TRY_CDF(nc_def_var(details->netCDF_info->file_ID,
                        "Crystal_OrbitalsI",NC_FLOAT,
                        3,(int *)dim_array,&orbI_ID));
   }
+  if( soc ){
+    TRY_CDF(nc_def_var(details->netCDF_info->file_ID,
+                       "Crystal_Orbitals_downR",NC_FLOAT,3,(int *)dim_array,&dnR_ID));
+    TRY_CDF(nc_def_var(details->netCDF_info->file_ID,
+                       "Crystal_Orbitals_downI",NC_FLOAT,3,(int *)dim_array,&dnI_ID));
+  }
   /* close define mode */
   TRY_CDF(nc_enddef(details->netCDF_info->file_ID));
 
-  /* now write the variables */
-  dim_array[0] = 0;
-  dim_array[1] = 0;
-  dim_array[2] = 0;
-  count_array[0] = details->num_KPOINTS;
-  count_array[1] = num_orbs;
-  count_array[2] = num_orbs;
-  TRY_CDF(nc_put_vara_float(details->netCDF_info->file_ID,orbR_ID,
-                             int_to_size_t(dim_array,start_buf),int_to_size_t(count_array,count_buf),
-                             (float *)prop_info->orbs));
-  if( cell_dim > 0 ){
-    TRY_CDF(nc_put_vara_float(details->netCDF_info->file_ID,orbI_ID,
+  /* now write the variables, one k point at a time (each k point has its
+     own arrays; the original wrote all of them from the first one) */
+  for(k=0;k<details->num_KPOINTS;k++){
+    dim_array[0] = k;
+    dim_array[1] = 0;
+    dim_array[2] = 0;
+    count_array[0] = 1;
+    count_array[1] = nstates;
+    count_array[2] = num_orbs;
+    TRY_CDF(nc_put_vara_float(details->netCDF_info->file_ID,orbR_ID,
                               int_to_size_t(dim_array,start_buf),int_to_size_t(count_array,count_buf),
-                              (float *)prop_info->orbsI));
+                              (float *)prop_info[k].orbs));
+    if( cell_dim > 0 || soc ){
+      TRY_CDF(nc_put_vara_float(details->netCDF_info->file_ID,orbI_ID,
+                                int_to_size_t(dim_array,start_buf),int_to_size_t(count_array,count_buf),
+                                (float *)prop_info[k].orbsI));
+    }
+    if( soc ){
+      TRY_CDF(nc_put_vara_float(details->netCDF_info->file_ID,dnR_ID,
+                                int_to_size_t(dim_array,start_buf),int_to_size_t(count_array,count_buf),
+                                (float *)prop_info[k].orbs_dn));
+      TRY_CDF(nc_put_vara_float(details->netCDF_info->file_ID,dnI_ID,
+                                int_to_size_t(dim_array,start_buf),int_to_size_t(count_array,count_buf),
+                                (float *)prop_info[k].orbsI_dn));
+    }
   }
-
 }
 
 /****************************************************************************
@@ -369,33 +391,40 @@ void netCDF_write_MOs(detail_type *details,int num_orbs,
  *
  * Returns: none
  *
- * Action:  Writes header information into a netCDF file.
+ * Action:  Writes the orbital energies (2n spinor states with SOC).
  *
  ****************************************************************************/
 void netCDF_write_Es(detail_type *details,int num_orbs,
                      avg_prop_info_type *prop_info)
 {
-  int E_var_ID;
+  int E_var_ID,state_dim_ID,k,nstates;
   int dim_array[10]={0},count_array[10]={0};
   size_t start_buf[10],count_buf[10];
 
+  nstates = soc_active() ? soc_num_states() : num_orbs;
   TRY_CDF(nc_redef(details->netCDF_info->file_ID));
+  if( soc_active() ){
+    if( nc_inq_dimid(details->netCDF_info->file_ID,"num_spinor_states",&state_dim_ID) != NC_NOERR )
+      TRY_CDF(nc_def_dim(details->netCDF_info->file_ID,"num_spinor_states",
+                         (size_t)nstates,&state_dim_ID));
+  } else state_dim_ID = details->netCDF_info->num_orbs_ID;
   dim_array[0] = details->netCDF_info->num_KPOINTS_ID;
-  dim_array[1] = details->netCDF_info->num_orbs_ID;
+  dim_array[1] = state_dim_ID;
   TRY_CDF(nc_def_var(details->netCDF_info->file_ID,
                      "Orbital_Energies",NC_FLOAT,
                      2,(int *)dim_array,&E_var_ID));
   /* close define mode */
   TRY_CDF(nc_enddef(details->netCDF_info->file_ID));
 
-  dim_array[0] = 0;
-  dim_array[1] = 0;
-  count_array[0] = details->num_KPOINTS;
-  count_array[1] = num_orbs;
-  TRY_CDF(nc_put_vara_float(details->netCDF_info->file_ID,E_var_ID,
-                             int_to_size_t(dim_array,start_buf),int_to_size_t(count_array,count_buf),
-                             (float *)prop_info->energies));
-
+  for(k=0;k<details->num_KPOINTS;k++){
+    dim_array[0] = k;
+    dim_array[1] = 0;
+    count_array[0] = 1;
+    count_array[1] = nstates;
+    TRY_CDF(nc_put_vara_float(details->netCDF_info->file_ID,E_var_ID,
+                              int_to_size_t(dim_array,start_buf),int_to_size_t(count_array,count_buf),
+                              (float *)prop_info[k].energies));
+  }
 }
 
 

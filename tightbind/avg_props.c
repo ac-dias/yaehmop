@@ -495,6 +495,8 @@ void calc_avg_OP(detail_type *details,cell_type *cell,int num_orbs,K_orb_ptr_typ
       MO_ptr = &(avg_prop_info[kpoint].orbs_dn[MO*num_orbs]);
       MO_ptrI = &(avg_prop_info[kpoint].orbsI_dn[MO*num_orbs]);
     }
+    /* SOC with two spin tables and different zetas: spin-down overlaps */
+    overlap.mat = (l == 1 && soc_down_overlap_R()) ? soc_down_overlap_R() : overlapR.mat;
 
     for(j=0;j<num_orbs;j++){
       for( k=j;k<num_orbs;k++){

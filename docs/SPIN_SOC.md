@@ -137,10 +137,35 @@ spinless EHT matrix elements (the on-site SOC term is not in it). This works for
 molecules (levels in Kramers pairs, populations, charges), charge iteration, Walsh
 diagrams and THIN mode (bands).
 
-**Not implemented with SOC yet.** The program stops with a message naming the option:
-FMO/FCO, `MO print` (.MO files for viewkel), zeta variation, modified Mulliken analysis,
-sparse dumps, the molecular electrostatic energy, netCDF, and the Walsh items that follow
-single MO coefficients. SOC needs the build with LAPACK (`-DUSE_BLAS_LAPACK=ON`).
+**Other options with SOC.** All the options of the program work with SOC. SOC needs the
+build with LAPACK (`-DUSE_BLAS_LAPACK=ON`).
+
+- *Modified Mulliken analysis* and *sparse dumps* (`Dump Sparse`): from the spin-summed
+  populations, and the spinor H and S (2n×2n) in the usual text format.
+- *Molecular electrostatic energy*, *zeta variation* and molecular *average properties*:
+  the extended Hückel energy sums the 2n spinor levels (one electron each). The molecular
+  total DOS counts spinor states (each spinless level counts twice), as in crystals.
+- *Walsh items*: `reduced charge mat walsh` takes `atom A M` (atom A in MO/state M; the
+  original read the matrix with a wrong stride). With SOC, `wave func walsh` and
+  `orbital coeff walsh` give sqrt(|c_up|² + |c_down|²): the coefficient itself is not
+  defined inside a Kramers pair (LAPACK returns any basis of the pair), this modulus is.
+- *`MO print`* (`.MO` file for viewkel): each spinor state appears twice, its spin-up part
+  and then its spin-down part, with complex coefficients (`Re Im` per AO). The global phase
+  is fixed so that the largest coefficient is real and positive; viewkel draws the real
+  part. The block of each part starts with a comment `; SOC state J spin up|down`.
+- *FMO/FCO*: the fragment orbitals are those of the spinless EHT hamiltonian (spin-up table
+  with two tables), each holding spin up and spin down. Populations and charge matrices in
+  the fragment basis add both spins. In the `.FMO` file (header `with occupations`) and in
+  the `.FCO` file every fragment orbital appears twice (spin up, spin down) with half of its
+  occupation, the 2n spinor states come with their occupations, and the 2n×2n charge matrix
+  has the weight of each spin; viewkel and `fit_FCO` read them unchanged.
+- *netCDF*: `Orbital_Energies` and the coefficient arrays have a dimension
+  `num_spinor_states` (2n); the spin-up part is in `Crystal_OrbitalsR/I`, the spin-down part
+  in `Crystal_Orbitals_downR/I`.
+- *Spin-resolved projected DOS*: with the keyword `Spin Resolved DOS` in the input, every
+  orbital or atom projected DOS curve is followed by its spin-up and spin-down parts
+  (`### PROJECTED DENSITY OF STATES (SPIN UP)` / `(SPIN DOWN)`); `fit_dos` reads them as
+  further projections.
 
 ## SOC on top of the two spin channels
 
@@ -149,11 +174,25 @@ bind --soc soc.dat --parm-up up.dat --parm-down down.dat [--const-up K1 --const-
 ```
 
 One calculation (one process, outputs without suffix) with
-H = diag(H_up(k), H_down(k)) + H_SOC and S = I2 (x) S(k). The two tables may differ in
-Hii (and K), not in the basis or the zetas (the program stops if they do). The electrons
-are those of the input, with one Fermi level; `--nelec-*` and `--common-fermi` do not
-apply. The spin moments in the `.out` give the magnetization. With lambda = 0 the result
-equals a spin-polarized run with `--common-fermi`.
+H = diag(H_up(k), H_down(k)) + H_SOC. The two tables must have the same shells; Hii, K and
+the zetas may differ. With the same zetas S = I2 (x) S(k). With different zetas each
+channel keeps its own functions and S = diag(S_up(k), S_down(k)): functions of different
+spin are orthogonal whatever their radial parts, so no up/down overlap is needed. The
+lambda of the SOC file is used as it is (it is a fitted parameter; the radial overlap of
+the up and down functions is absorbed in it). Charge matrices, Mulliken populations, COOP
+and average overlap populations use the overlaps of each spin. The `.out` records
+`#SOC_SPIN_ZETAS: same|different`. The electrons are those of the input, with one Fermi
+level; `--nelec-*` and `--common-fermi` do not apply. The spin moments in the `.out` give
+the magnetization. With lambda = 0 the result equals a spin-polarized run with
+`--common-fermi` (bands, Fermi level, moment, projected DOS of each channel), with the same
+or with different zetas.
+
+*Charge iteration* (`Charge Iteration`) and *zeta variation* work with two tables: after
+each step the spin-down table gets the same change of Hii and exponents as the spin-up one,
+so the difference between the tables (the exchange splitting) is kept; the `.out` lists the
+spin-down parameters after each step. The *Muller iteration* is refused (it replaces the
+table parameters by spin-independent ones). With different zetas FMO/FCO, `MO print` and the
+molecular electrostatic energy are refused (they need one set of functions per atom).
 
 ## viewkel
 

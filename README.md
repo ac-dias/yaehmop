@@ -27,10 +27,19 @@ New features:
   writes a summary `<input>.spin` (Fermi level, N_up, N_down, moments per atom).
 - **Spin-orbit coupling** (on-site lambda L.S): `bind --soc soc.dat input params.dat`.
   Gives 2n spinor bands, spinor H(k)/S(k) in the `.HAM`/`.OV` dumps, a `.SOC` file with
-  H_SOC, and all the usual properties with SOC (projected DOS, COOP/COHP, charges,
-  populations, charge iteration, Walsh, molecules) plus spin moments.
+  H_SOC, and every option of the program with SOC: projected DOS (also resolved in spin,
+  keyword `Spin Resolved DOS`), COOP/COHP, charges, populations, modified Mulliken, charge
+  iteration, zeta variation, Walsh, molecules (electrostatic energy, average properties),
+  FMO/FCO, `MO print` for viewkel, sparse dumps and netCDF, plus spin moments.
 - **SOC on top of two spin channels**: `bind --soc soc.dat --parm-up up.dat --parm-down
-  down.dat input`, H = diag(H_up, H_down) + H_SOC.
+  down.dat input`, H = diag(H_up, H_down) + H_SOC. The tables may have different Hii and
+  zetas (S = diag(S_up, S_down) when the zetas differ); charge iteration and zeta variation
+  change both tables alike.
+- **Fixes of old defects** found on the way: the `vary` list of `Charge Iteration` crashed
+  (uninitialized pointer); `my_realloc` read past the old block; `calc_occupations` read
+  outside the eigenvalue array; the Walsh item of the reduced charge matrix used a wrong
+  index; netCDF energies and coefficients were written from the first k point only; the OP
+  matrix was not allocated when only the modified Mulliken analysis was asked for.
 - **viewkel**: a file named `*_up.*` is shown together with its `*_down.*` partner
   (bands, DOS, COOP).
 - **`THE CONST DIAG <K>`**: new input keyword for the K of the diagonal H_ii(k) term (an

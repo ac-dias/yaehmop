@@ -1262,7 +1262,7 @@ void print_MOs(detail_type *details,int num_orbs,eigenset_type eigenset,int kpoi
 
   int i,j,k;
   int curr_atom,begin_atom,end_atom;
-  int num_walsh_steps;
+  int num_walsh_steps,nspin_parts;
   sym_op_type *symm_op;
   int ops_passed;
   real this_character;
@@ -1290,10 +1290,11 @@ void print_MOs(detail_type *details,int num_orbs,eigenset_type eigenset,int kpoi
 
     /* If num MOs is empty, etc. we'll assume it's all MOs */
     if (details->num_MOs_to_print < 0) {
-      details->num_MOs_to_print = num_orbs;
+      /* SOC: the 2n spinor states */
+      details->num_MOs_to_print = soc_active() ? soc_num_states() : num_orbs;
 
       /* get memory */
-      details->MOs_to_print = (int *)calloc(num_orbs, sizeof(int));
+      details->MOs_to_print = (int *)calloc(details->num_MOs_to_print, sizeof(int));
       if(!details->MOs_to_print)fatal("Can't get memory for MOs_to_print.");
 
       /* now read out the MOs that will be printed */
@@ -1332,23 +1333,32 @@ void print_MOs(detail_type *details,int num_orbs,eigenset_type eigenset,int kpoi
       num_walsh_steps = details->walsh_details.num_steps;
     }
 
+    /* SOC: every spinor state is written twice, its spin-up part and then its
+       spin-down part (complex coefficients, global phase fixed in soc.c) */
+    nspin_parts = soc_active() ? 2 : 1;
+    if( soc_active() ){
+      for(k=0;k<details->num_MOs_to_print;k++)
+        if( details->MOs_to_print[k] < 0 || details->MOs_to_print[k] >= soc_num_states() )
+          fatal("MO print: spinor state number out of range.");
+      fprintf(MO_file,"; SOC: each spinor state appears twice, spin-up part then spin-down part\n");
+    }
     if( details->Execution_Mode != MOLECULAR ){
       fprintf(MO_file,"#Num_MOs %d\n",
-              num_walsh_steps*details->num_MOs_to_print*details->num_KPOINTS);
+              num_walsh_steps*details->num_MOs_to_print*details->num_KPOINTS*nspin_parts);
       for(i=0;i<num_walsh_steps;i++){
         for(j=0;j<details->num_KPOINTS;j++){
-          for(k=0;k<details->num_MOs_to_print;k++){
-            fprintf(MO_file,"%d %lf %lf %lf %d\n",details->MOs_to_print[k]+1,
+          for(k=0;k<details->num_MOs_to_print*nspin_parts;k++){
+            fprintf(MO_file,"%d %lf %lf %lf %d\n",details->MOs_to_print[k/nspin_parts]+1,
                     details->K_POINTS[j].loc.x,details->K_POINTS[j].loc.y,
                     details->K_POINTS[j].loc.z,i+1);
           }
         }
       }
     } else{
-      fprintf(MO_file,"#Num_MOs %d\n",details->num_MOs_to_print*num_walsh_steps);
+      fprintf(MO_file,"#Num_MOs %d\n",details->num_MOs_to_print*num_walsh_steps*nspin_parts);
       for(i=0;i<num_walsh_steps;i++){
-        for(j=0;j<details->num_MOs_to_print;j++){
-          fprintf(MO_file,"%d 0 0 0 %d\n",details->MOs_to_print[j]+1,i+1);
+        for(j=0;j<details->num_MOs_to_print*nspin_parts;j++){
+          fprintf(MO_file,"%d 0 0 0 %d\n",details->MOs_to_print[j/nspin_parts]+1,i+1);
         }
       }
     }
@@ -1379,6 +1389,36 @@ void print_MOs(detail_type *details,int num_orbs,eigenset_type eigenset,int kpoi
 
 /* round a to nearest int */
 #define ROUND(a)        (int)floor((a)+0.5)
+
+  /* SOC: spinor states, spin-up and spin-down parts, symmetry characters 0 */
+  if( soc_active() ){
+    static real *ur=0,*ui=0,*dr=0,*di=0;
+    int sp;
+    if( !ur ){
+      ur = (real *)calloc(4*num_orbs,sizeof(real));
+      if( !ur ) fatal("Can't allocate the SOC MO coefficients.");
+      ui = ur + num_orbs; dr = ui + num_orbs; di = dr + num_orbs;
+    }
+    for(i=0;i<details->num_MOs_to_print;i++){
+      soc_state_vector(details->MOs_to_print[i],ur,ui,dr,di);
+      for(sp=0;sp<2;sp++){
+        real *cr = sp ? dr : ur, *ci = sp ? di : ui;
+        fprintf(MO_file,"#begin_mo 0 0 0\n");
+        fprintf(MO_file,"; SOC state %d spin %s\n",details->MOs_to_print[i]+1,sp ? "down" : "up");
+        for( curr_atom=0; curr_atom<num_atoms; curr_atom++ ){
+          find_atoms_orbs(num_orbs,num_atoms,curr_atom,orbital_lookup_table,
+                          &(begin_atom),&(end_atom));
+          if( begin_atom >= 0 ){
+            fprintf(MO_file,"; %d\n",curr_atom+1);
+            for(j=begin_atom; j<end_atom; j++)
+              fprintf(MO_file,"%6.4lf %6.4lf\n",cr[j],ci[j]);
+          }
+        }
+        fprintf(MO_file,"#end_mo\n");
+      }
+    }
+    return;
+  }
 
   /* okay... we're set, write the MO's that we need to */
   for(i=0;i<details->num_MOs_to_print;i++){
