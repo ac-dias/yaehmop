@@ -147,7 +147,7 @@ def main():
     axs[0].set_ylabel("E − E$_{VBM}$ (eV)")
     h, l = axs[1].get_legend_handles_labels()
     fig.legend(h, l, loc="upper right", fontsize=8, frameon=False, ncol=2)
-    fig.suptitle("yaehmop-dev → yaehmop2wtb.py → WanTiBEXOS (wtb.x)", fontsize=11, x=0.35)
+    fig.suptitle("yaehmop-dev → yaehmop2wtb-full.py → WanTiBEXOS (wtb.x)", fontsize=11, x=0.35)
     fig.tight_layout(rect=(0, 0, 1, 0.95))
     fig.savefig(HERE / "bands_yaehmop_vs_wtb.png", dpi=200)
     print("wrote", HERE / "bands_yaehmop_vs_wtb.png")

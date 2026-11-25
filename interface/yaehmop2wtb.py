@@ -1,496 +1,526 @@
 #!/usr/bin/env python3
-"""YAeHMOP (yaehmop-dev) H and S  ->  WanTiBEXOS non-orthogonal tight-binding files.
+"""YAeHMOP H and S -> WanTiBEXOS tight-binding file and basis file (lean version).
 
-    python3 yaehmop2wtb.py RUN.bind [-o OUTDIR] [--zero auto|fermi|midgap|<eV>]
+    python3 yaehmop2wtb.py RUN.bind [-o OUTDIR] [--efermi EV] [--rmatrix [--params PARMS [PARMS_DOWN]]]
 
-RUN.bind is the input file of a YAeHMOP run made with 'Dump Hamil' and
-'Dump Overlap' and a 'K points' block holding a full Gamma-centred mesh. The
-outputs of that run are found next to it and the kind of run is detected:
+Reads only the results of a YAeHMOP run made with 'Dump Hamil', 'Dump Overlap'
+and a full Gamma-centred 'K points' mesh (outputs next to RUN.bind) and writes
 
-  spinless            RUN.bind.HAM/.OV/.out                    -> huckel-NP.dat,  basis_set-NP
-  SOC (--soc)         RUN.bind.HAM/.OV (2n x 2n), .out         -> huckel-SOC.dat, basis_set-SOC
-  spin polarized      RUN_up.bind.*, RUN_down.bind.*           -> huckel-SP.dat,  basis_set-SP
+  huckel-<TYPE>.dat    H(R) - E_F S(R) and S(R) in the non-orthogonal WanTiBEXOS
+                       layout (as siesta2wtb.py, DFT= S), Fermi level 0
+  basis_set-<TYPE>     index species x y z l m spin
+  huckel-<TYPE>_r.dat  with --rmatrix: the position matrix <m,0|r|n,R> of the
+                       Slater basis (Angstrom), in the layout of siesta2wtb.py
+                       --rmatrix (Wannier90 seedname_r.dat; BSE_CENTER_FILE)
 
-What it does
-  1. reads the structure, the lattice, the overlap radius r and the k points
-     from RUN.bind, and the orbitals of each element, the electron count and the
-     Fermi level from the .out;
-  2. reads H(k), S(k) from the binary dumps (int nk, int n, then per k an n x n
-     double array; element (i,j), i<j, is m[i][j] - i*m[j][i]);
-  3. gets the real-space matrices by an inverse Fourier transform on the mesh,
-         H(R) = (1/N) sum_k exp(-2 pi i k.R) H(k),   |R_i| <= r_i,
-     which is exact when the mesh has N_i >= 2 r_i + 1 points along each
-     periodic direction (YAeHMOP sums the lattice up to r cells), and checks it
-     by rebuilding H(k), S(k) on the mesh;
-  4. writes the WanTiBEXOS file (same layout as siesta2wtb.py, read with
-     DFT= S): type, scissors, Fermi level, 3 lattice vectors [A], basis size,
-     number of R vectors, then 'Rx Ry Rz [A]  i  j  ReH  ImH  S';
-  5. writes the basis file (index species x y z l m spin), an input file and
-     a k-path file for wtb.x (the band path of RUN.bind).
+TYPE is NP (spinless), SOC (bind --soc, 2n x 2n spinors) or SP (RUN_up.bind.*
+and RUN_down.bind.*), detected from the files. yaehmop2wtb-full.py does the
+same plus the energy-zero choices (midgap), the input and k-path files for
+wtb.x and a log.
 
-Energy zero: wtb.x diagonalizes (H(k) - E_F*I, S(k)), which is not a rigid shift
-when S != I. The file therefore holds H(R) - E0*S(R) with Fermi level 0, so wtb.x
-gives exactly the YAeHMOP eigenvalues minus E0. --zero auto uses the midgap of
-the mesh eigenvalues for a gapped system and the Fermi level of the .out
-otherwise. Spin polarized: with a common Fermi level (bind --common-fermi, read
-from RUN.bind.spin) both channels get that one zero; in a fixed-moment run each
-channel gets its own Fermi level, so that both channels have E_F at 0, as when
-the channels were fitted to a DFT run with that moment. SOC with two spin
-tables (one 2n x 2n run) is converted like any SOC run.
+H(R) = (1/N) sum_k exp(-2 pi i k.R) H(k) for |R_i| <= r_i (the overlap radius
+of the Lattice section), exact when N_i >= 2 r_i + 1 and the k points are
+written with 12 or more decimals. The energy zero E_F is the Fermi level of the
+.out ('Average Properties'), the common one of RUN.bind.spin for a spin
+polarized run with bind --common-fermi, or --efermi.
 
-Needs numpy (and scipy for the eigenvalues).
+--rmatrix: X_ij(R) = <phi_i,0| r |phi_j,R>, absolute coordinates in the frame
+of basis_set-*, spin diagonal. The orbitals are YAeHMOP's normalized Slater
+functions, c1 r^(n-1) e^(-z1 r) [+ c2 r^(n-1) e^(-z2 r)] times real spherical
+harmonics, integrated numerically (bipolar coordinates for two centres,
+spherical for one) for the atom pairs with a non-zero overlap in YAeHMOP. The
+same quadrature gives S, compared with YAeHMOP's (~1e-7 with --params). The
+.out prints the exponents with 4 decimals (S then agrees to ~5e-5); --params
+gives the parameter file of the run for the full precision (SP: the up and the
+down file, since the two channels have their own orbitals, and the same for
+SOC on two tables with different zetas, where it is required; not with charge
+iteration, where the .out has the final exponents). ~10-40 s for a small cell.
+
+Needs numpy.
 """
-import argparse, re, sys
+import argparse, itertools, re, sys
+from math import factorial
 from pathlib import Path
 import numpy as np
 
+BOHR = 1 / 1.889644746             # Angstrom: the AUI of YAeHMOP's overlaps (R_overlap_mat.c),
+                                   # not its BOHR = 0.52918 (bind.h)
 ORBITALS = {"s": ["s"], "p": ["px", "py", "pz"],
             "d": ["dx2-y2", "dz2", "dxy", "dxz", "dyz"],
             "f": ["fz3", "fxz2", "fyz2", "fxyz", "fz(x2-y2)", "fx(x2-3y2)", "fy(3x2-y2)"]}
-# (l, m) of the real orbitals, as in the basis files of WanTiBEXOS/sisl
 ORBITAL_LM = {"s": (0, 0), "px": (1, 1), "py": (1, -1), "pz": (1, 0),
               "dx2-y2": (2, 2), "dz2": (2, 0), "dxy": (2, -2), "dxz": (2, 1), "dyz": (2, -1),
               "fz3": (3, 0), "fxz2": (3, 1), "fyz2": (3, -1), "fxyz": (3, -2),
               "fz(x2-y2)": (3, 2), "fx(x2-3y2)": (3, 3), "fy(3x2-y2)": (3, -3)}
 
 
-# ------------------------------------------------------------------ input file
-def read_bind_input(path):
-    """Structure, lattice, overlap radius, k points, band path of a .bind file."""
-    raw = Path(path).read_text().splitlines()
-    lines = [l.split(";")[0].rstrip() for l in raw]
-    lines = [l for l in lines if l.strip()]
-    up = [l.strip().upper() for l in lines]
-    info = dict(kpoints=None, band=None, electrons=None, charge=0.0, crystal=None)
+# ------------------------------------------------------------------ YAeHMOP files
+def read_bind(path):
+    """Atoms, lattice vectors [A], periodic dimension, overlap radius, k points."""
+    lines = [l.split(";")[0].strip() for l in Path(path).read_text().splitlines()]
+    lines = [l for l in lines if l]
+    up = [l.upper() for l in lines]
+    info = dict(kpoints=None, crystal=None)
     i = 0
     while i < len(lines):
         u = up[i]
         if u.startswith("GEOMETRY"):
-            info["crystallographic"] = "CRYSTAL" in u
+            info["frac"] = "CRYSTAL" in u
             n = int(lines[i + 1].split()[0])
-            atoms = []
-            for l in lines[i + 2:i + 2 + n]:
-                p = l.split()
-                atoms.append((p[1], np.array([float(x) for x in p[2:5]])))
-            info["atoms"] = atoms
+            info["atoms"] = [(p[1], np.array(p[2:5], float))
+                             for p in (l.split() for l in lines[i + 2:i + 2 + n])]
             i += 2 + n
-            continue
-        if u == "LATTICE":
+        elif u == "LATTICE":
             dim = int(lines[i + 1].split()[0])
-            ov = [int(x) for x in lines[i + 2].split()[:3]]
-            vec = [tuple(int(x) for x in lines[i + 3 + j].split()[:2]) for j in range(dim)]
-            info.update(dim=dim, overlaps=ov, lattice_atoms=vec)
+            info.update(dim=dim, overlaps=[int(x) for x in lines[i + 2].split()[:3]],
+                        ends=[tuple(int(x) for x in lines[i + 3 + j].split()[:2]) for j in range(dim)])
             i += 3 + dim
-            continue
-        if u.startswith("CRYSTAL SPEC"):
-            info["crystal"] = ([float(x) for x in lines[i + 1].split()[:3]],
-                               [float(x) for x in lines[i + 2].split()[:3]])
+        elif u.startswith("CRYSTAL SPEC"):
+            info["crystal"] = [[float(x) for x in lines[i + j].split()[:3]] for j in (1, 2)]
             i += 3
-            continue
-        if u.startswith("K POINTS") or u == "KPOINTS":
+        elif u.startswith("K POINTS") or u == "KPOINTS":
             n = int(lines[i + 1].split()[0])
-            info["kpoints"] = np.array([[float(x) for x in l.split()[:3]] for l in lines[i + 2:i + 2 + n]])
+            info["kpoints"] = np.array([l.split()[:3] for l in lines[i + 2:i + 2 + n]], float)
             i += 2 + n
-            continue
-        if u == "BAND" or u == "BANDS":
-            ppl = int(lines[i + 1].split()[0]); nsp = int(lines[i + 2].split()[0])
-            pts = []
-            for l in lines[i + 3:i + 3 + nsp]:
-                p = l.split()
-                pts.append((p[0], np.array([float(x) for x in p[1:4]])))
-            info["band"] = (ppl, pts)
-            i += 3 + nsp
-            continue
-        if u.startswith("ELECTRONS"):
-            p = lines[i].split()
-            info["electrons"] = float(p[1]) if len(p) > 1 else float(lines[i + 1].split()[0])
-            i += 1 if len(p) > 1 else 2
-            continue
-        if u.startswith("CHARGE"):
-            p = lines[i].split()
-            info["charge"] = float(p[1]) if len(p) > 1 else float(lines[i + 1].split()[0])
-            i += 1 if len(p) > 1 else 2
-            continue
-        i += 1
-    for key in ("atoms", "dim"):
-        if key not in info:
-            raise SystemExit(f"{path}: no {'Geometry' if key == 'atoms' else 'Lattice'} section found")
-    return info
-
-
-def cell_from_spec(lengths, angles):
-    """Lattice vectors as YAeHMOP builds them: a along x, b in the xy plane."""
-    a, b, c = lengths
-    al, be, ga = np.radians(angles)
-    A = np.zeros((3, 3))
-    A[0] = [a, 0, 0]
-    A[1] = [b * np.cos(ga), b * np.sin(ga), 0]
-    cx = c * np.cos(be)
-    cy = c * (np.cos(al) - np.cos(be) * np.cos(ga)) / np.sin(ga)
-    A[2] = [cx, cy, np.sqrt(max(c * c - cx * cx - cy * cy, 0.0))]
-    return A
-
-
-def structure(info):
-    """Real atoms (symbol, cartesian position) and the 3 lattice vectors [A]."""
+        else:
+            i += 1
+    if "atoms" not in info or "dim" not in info:
+        raise SystemExit(f"{path}: needs Geometry and Lattice sections")
+    if info["kpoints"] is None:
+        raise SystemExit(f"{path}: no 'K points' block (the H/S dumps are written on those k points)")
     atoms, dim = info["atoms"], info["dim"]
-    nreal = len(atoms) - dim            # the ends of the lattice vectors are the last atoms
-    if info["crystallographic"]:
-        if info["crystal"] is None:
-            raise SystemExit("Crystallographic geometry without a 'Crystal Spec' section")
-        cell = cell_from_spec(*info["crystal"])
-        cart = [(s, f @ cell) for s, f in atoms]
+    if info["frac"]:
+        (a, b, c), angles = info["crystal"]
+        al, be, ga = np.radians(angles)
+        cx, cy = c * np.cos(be), c * (np.cos(al) - np.cos(be) * np.cos(ga)) / np.sin(ga)
+        cell = np.array([[a, 0, 0], [b * np.cos(ga), b * np.sin(ga), 0],
+                         [cx, cy, np.sqrt(max(c * c - cx * cx - cy * cy, 0.0))]])
+        atoms = [(s, f @ cell) for s, f in atoms]
     else:
-        cart = list(atoms)
         cell = np.zeros((3, 3))
-        for j, (b, e) in enumerate(info["lattice_atoms"]):
-            cell[j] = cart[e - 1][1] - cart[b - 1][1]
-        pos = np.array([p for _, p in cart[:nreal]])
-        # vacuum directions of 1D/2D systems: unit vectors orthogonal to the
-        # periodic ones, long enough to hold the atoms plus 15 A of vacuum
-        for j in range(dim, 3):
-            if j == 1:                      # 1D: any direction orthogonal to a
+        for j, (b, e) in enumerate(info["ends"]):
+            cell[j] = atoms[e - 1][1] - atoms[b - 1][1]
+        pos = np.array([p for _, p in atoms[:len(atoms) - dim]])
+        for j in range(dim, 3):              # vacuum directions: orthogonal, 15 A of vacuum
+            if j == 1:
                 t = np.array([0.0, 0.0, 1.0])
                 if abs(cell[0] @ t) > 0.9 * np.linalg.norm(cell[0]):
                     t = np.array([1.0, 0.0, 0.0])
                 v = np.cross(cell[0], t)
-            else:                           # third vector: orthogonal to the first two
+            else:
                 v = np.cross(cell[0], cell[1])
-            v = v / np.linalg.norm(v)
-            ext = np.ptp(pos @ v) if len(pos) > 1 else 0.0
-            cell[j] = v * max(20.0, ext + 15.0)
-    real = [(s, p) for s, p in cart[:nreal] if not s.startswith("&")]
+            v /= np.linalg.norm(v)
+            cell[j] = v * max(20.0, (np.ptp(pos @ v) if len(pos) > 1 else 0.0) + 15.0)
+    real = [(s, p) for s, p in atoms[:len(atoms) - dim] if not s.startswith("&")]
     if any(s.startswith("*") for s, _ in real):
-        raise SystemExit("Atoms with parameters given in the input ('*') are not supported")
-    return real, cell
+        raise SystemExit("atoms with parameters given in the input ('*') are not supported")
+    info.update(real=real, cell=cell)
+    return info
 
 
-# ------------------------------------------------------------------ .out file
 def read_out(path):
+    """Shells of each element (or atom, with charge iteration), Fermi level, SOC flag."""
     text = Path(path).read_text()
     shells, cur = {}, None
     for l in text.splitlines():
-        m = re.match(r"ATOM:\s+(\S+)\s+Atomic number:.*# Valence Electrons:\s*(\d+)", l)
+        m = re.match(r"ATOM:\s+(\S+)\s+Atomic number:", l)
         if m:
-            cur = m.group(1).upper(); shells[cur] = dict(shells=[], valence=int(m.group(2)))
+            cur = m.group(1).upper()
+            shells.setdefault(cur, {})
             continue
-        m = re.match(r"\s+\d+([SPDF])(?: DZ)?:", l)   # "3P DZ:" for a double-zeta p shell
+        m = re.match(r"\s+(\d+)([SPDF])(?: DZ)?:\s+(.*)", l)
         if cur and m:
-            shells[cur]["shells"].append(m.group(1).lower())
+            v = [float(x) for x in m.group(3).split()]
+            sh = m.group(2).lower()
+            # s, p: Hii z1;  p DZ, d, f: Hii c1 z1 c2 z2  (coefficients already normalized)
+            shells[cur][sh] = dict(n=int(m.group(1)), stos=[(1.0, v[1])] if len(v) == 2 else
+                                   [(c, z) for c, z in ((v[1], v[2]), (v[3], v[4])) if c != 0.0])
             continue
         if cur and not l.startswith("\t"):
             cur = None
-    def key(k, cast=float):
-        v = re.findall(rf"#{k}:\s*(\S+)", text)
-        return cast(v[-1]) if v else None
-    return dict(shells=shells, fermi=key("Fermi_Energy"), soc_states=key("SOC_STATES", int),
-                channel=(re.findall(r"#SPIN_CHANNEL:\s*(\S+)", text) or [None])[-1],
-                # with --common-fermi the channel's electrons come from the shared Fermi level
-                channel_electrons=key("ELECTRONS_THIS_CHANNEL_COMMON_FERMI")
-                or key("ELECTRONS_THIS_CHANNEL"),
-                lattice=[np.array([float(x) for x in l.split()[1:4]])
-                         for l in re.findall(r"^\([abc]\)\s+.*$", text, re.M)])
+    fermi = re.findall(r"#Fermi_Energy:\s*(\S+)", text)
+    return dict(shells=shells, fermi=float(fermi[-1]) if fermi else None,
+                soc=bool(re.search(r"#SOC_STATES:", text)),
+                # SOC on two parameter tables with different zetas: S = diag(S_up, S_down)
+                soc_two_zetas=bool(re.search(r"#SOC_SPIN_ZETAS:\s*different", text)))
 
 
-def orbital_labels(real_atoms, shells):
-    labels = []
-    for ia, (sym, pos) in enumerate(real_atoms):
-        el = sym.upper()
-        if el not in shells:
-            raise SystemExit(f"element {sym} not found in the parameters of the .out")
-        for sh in "spdf":
-            if sh in shells[el]["shells"]:
-                labels += [(ia, sym, orb) for orb in ORBITALS[sh]]
-    return labels
+def read_params(path):
+    """Slater functions from a YAeHMOP parameter file, normalized as bind does."""
+    shells = {}
+    for l in Path(path).read_text().splitlines():
+        p = l.split(";")[0].split()
+        if len(p) < 11 or p[0].upper() == "END":
+            continue
+        sym, nzeta, nq, ang = p[0].upper(), int(p[3]), int(p[4]), p[5].lower()
+        hii, z1, z2, c1, c2 = (float(x) for x in p[6:11])
+        if hii == 0.0:
+            continue
+        if nzeta == 2:
+            s12 = (4 * z1 * z2 / (z1 + z2) ** 2) ** (nq + 0.5)
+            norm = np.sqrt(c1 * c1 + c2 * c2 + 2 * s12 * c1 * c2)
+            stos = [(c1 / norm, z1), (c2 / norm, z2)]
+        else:
+            stos = [(1.0 if ang in "sp" else c1, z1)]
+        shells.setdefault(sym, {}).setdefault(ang, dict(n=nq, stos=stos))
+    return shells
 
 
-# ------------------------------------------------------------------ matrices
 def read_dump(path):
+    """H(k) or S(k): int nk, int n, then per k an n x n doubles array in which
+    element (i,j), i<j, is m[i][j] - i m[j][i]."""
     raw = Path(path).read_bytes()
     nk, n = (int(x) for x in np.frombuffer(raw[:8], dtype=np.int32))
-    data = np.frombuffer(raw[8:8 + 8 * nk * n * n], dtype=np.float64)
-    if data.size != nk * n * n:
-        raise SystemExit(f"{path}: file is shorter than its header says ({nk} k points, n = {n})")
-    data = data.reshape(nk, n, n)
+    m = np.frombuffer(raw[8:8 + 8 * nk * n * n], dtype=np.float64)
+    if m.size != nk * n * n:
+        raise SystemExit(f"{path}: shorter than its header says ({nk} k points, n = {n})")
+    m = m.reshape(nk, n, n)
     iu = np.triu_indices(n, 1)
     out = np.zeros((nk, n, n), complex)
-    for q in range(nk):
-        m = data[q]
-        H = np.diag(np.diag(m)).astype(complex)
-        H[iu] = m[iu] - 1j * m.T[iu]
-        H[(iu[1], iu[0])] = np.conj(H[iu])
-        out[q] = H
+    out[:, np.arange(n), np.arange(n)] = m[:, np.arange(n), np.arange(n)]
+    out[:, iu[0], iu[1]] = m[:, iu[0], iu[1]] - 1j * m[:, iu[1], iu[0]]
+    out[:, iu[1], iu[0]] = np.conj(out[:, iu[0], iu[1]])
     return out
 
 
-def check_mesh(kpts, dim, overlaps):
-    """The k points must be a full Gamma-centred N1 x N2 x N3 mesh; returns N."""
+# ------------------------------------------------------------------ H(R), S(R)
+def mesh_size(kpts, dim, ov):
     N = []
     for d in range(3):
         if d >= dim:
-            if np.abs(kpts[:, d]).max() > 1e-6:
-                raise SystemExit("k points have a component along a non-periodic direction")
-            N.append(1); continue
-        frac = np.mod(kpts[:, d] + 1e-9, 1.0)
-        vals = np.unique(np.round(frac, 6))
-        n = len(vals)
-        if not np.allclose(vals, np.arange(n) / n, atol=2e-6):
-            raise SystemExit(f"the k points are not a uniform Gamma-centred mesh along direction {d+1}")
-        N.append(n)
-    if len(kpts) != int(np.prod(N)):
-        raise SystemExit(f"{len(kpts)} k points, but a {N[0]}x{N[1]}x{N[2]} mesh has {int(np.prod(N))}")
-    alias = [d for d in range(dim) if N[d] < 2 * overlaps[d] + 1]
-    # rounding of the k points in the input: YAeHMOP uses them as written, so the
-    # Fourier transform is exact only if they are close to j/N
+            N.append(1)
+            continue
+        vals = np.unique(np.round(np.mod(kpts[:, d] + 1e-9, 1.0), 6))
+        if not np.allclose(vals, np.arange(len(vals)) / len(vals), atol=2e-6):
+            raise SystemExit(f"the k points are not a uniform Gamma-centred mesh along direction {d + 1}")
+        N.append(len(vals))
+    if len(kpts) != np.prod(N):
+        raise SystemExit(f"{len(kpts)} k points, but a {N[0]}x{N[1]}x{N[2]} mesh has {np.prod(N)}")
+    if any(N[d] < 2 * ov[d] + 1 for d in range(dim)):
+        raise SystemExit(f"the mesh {N} is too small for the overlap radius {ov}: "
+                         f"use N_i >= 2 r_i + 1 (or yaehmop2wtb-full.py --allow-aliasing)")
     dev = max(np.abs(kpts[:, d] - np.round(kpts[:, d] * N[d]) / N[d]).max() for d in range(dim))
-    return N, alias, dev
+    if dev > 1e-9:
+        print(f"WARNING: k points rounded by up to {dev:.1e}: write them with 12 or more decimals "
+              "for an exact H(R)", file=sys.stderr)
+    return N
 
 
-def real_space(Hk, Sk, kpts, dim, overlaps):
-    import itertools
-    rng = [range(-overlaps[d], overlaps[d] + 1) if d < dim else (0,) for d in range(3)]
+def real_space(Hk, Sk, kpts, dim, ov, e0, cutoff):
+    """[(R, H(R) - e0 S(R), S(R))] for the R vectors with some |H| or |S| > cutoff,
+    and the largest error of H(k), S(k) rebuilt on the mesh."""
+    rng = [range(-ov[d], ov[d] + 1) if d < dim else (0,) for d in range(3)]
     cells = []
+    Hr, Sr = np.zeros_like(Hk), np.zeros_like(Sk)
     for R in itertools.product(*rng):
         R = np.array(R)
-        ph = np.exp(-2j * np.pi * (kpts @ R))[:, None, None]
-        cells.append((R, (ph * Hk).sum(0) / len(kpts), (ph * Sk).sum(0) / len(kpts)))
-    return cells
+        ph = np.exp(-2j * np.pi * (kpts @ R))
+        h = np.tensordot(ph, Hk, 1) / len(kpts)
+        s = np.tensordot(ph, Sk, 1) / len(kpts)
+        Hr += np.conj(ph)[:, None, None] * h
+        Sr += np.conj(ph)[:, None, None] * s
+        if max(np.abs(h).max(), np.abs(s).max()) > cutoff:
+            cells.append((R, h - e0 * s, s.real))
+    if max(np.abs(s.imag).max() for _, _, s in cells) > 1e-6:
+        raise SystemExit("S(R) is not real")
+    return cells, np.abs(Hr - Hk).max(), np.abs(Sr - Sk).max()
 
 
-def rebuild_error(cells, Hk, Sk, kpts):
-    eH = eS = 0.0
-    for q, k in enumerate(kpts):
-        H = sum(np.exp(2j * np.pi * (k @ R)) * h for R, h, _ in cells)
-        S = sum(np.exp(2j * np.pi * (k @ R)) * s for R, _, s in cells)
-        eH = max(eH, np.abs(H - Hk[q]).max()); eS = max(eS, np.abs(S - Sk[q]).max())
-    return eH, eS
+# ------------------------------------------------------------------ position matrix
+def _ylm(orb, v, r):
+    """Real spherical harmonics (the orbital names of YAeHMOP) at the points v (|v| = r)."""
+    x, y, z = (v[:, i] / r for i in range(3))
+    pi = np.pi
+    return {"s": 0 * x + np.sqrt(1 / (4 * pi)),
+            "px": np.sqrt(3 / (4 * pi)) * x, "py": np.sqrt(3 / (4 * pi)) * y,
+            "pz": np.sqrt(3 / (4 * pi)) * z,
+            "dx2-y2": np.sqrt(15 / (16 * pi)) * (x * x - y * y),
+            "dz2": np.sqrt(5 / (16 * pi)) * (3 * z * z - 1),
+            "dxy": np.sqrt(15 / (4 * pi)) * x * y, "dxz": np.sqrt(15 / (4 * pi)) * x * z,
+            "dyz": np.sqrt(15 / (4 * pi)) * y * z,
+            "fz3": np.sqrt(7 / (16 * pi)) * z * (5 * z * z - 3),
+            "fxz2": np.sqrt(21 / (32 * pi)) * x * (5 * z * z - 1),
+            "fyz2": np.sqrt(21 / (32 * pi)) * y * (5 * z * z - 1),
+            "fxyz": np.sqrt(105 / (4 * pi)) * x * y * z,
+            "fz(x2-y2)": np.sqrt(105 / (16 * pi)) * z * (x * x - y * y),
+            "fx(x2-3y2)": np.sqrt(35 / (32 * pi)) * x * (x * x - 3 * y * y),
+            "fy(3x2-y2)": np.sqrt(35 / (32 * pi)) * y * (3 * x * x - y * y)}[orb]
 
 
-def mesh_gap(Hk, Sk, nocc):
-    import scipy.linalg as sl
-    if nocc is None or abs(nocc - round(nocc)) > 1e-6 or round(nocc) < 1:
-        return None
-    nocc = int(round(nocc))
-    e = np.array([sl.eigh(h, s, eigvals_only=True) for h, s in zip(Hk, Sk)])
-    if nocc >= e.shape[1]:
-        return None
-    vbm, cbm = e[:, nocc - 1].max(), e[:, nocc].min()
-    return vbm, cbm
+class Atom:
+    """Slater orbitals of one atom (Angstrom units) and their extent."""
+
+    def __init__(self, shells, tol=1e-7):
+        self.orbs, self.radial, rc = [], [], 0.0
+        for sh in "spdf":
+            if sh not in shells:
+                continue
+            n = shells[sh]["n"]
+            # (c, N, z) per Slater function, z in 1/A, N = (2z)^(n+1/2) / sqrt((2n)!)
+            stos = [(c, (2 * z / BOHR) ** (n + 0.5) / np.sqrt(factorial(2 * n)), z / BOHR)
+                    for c, z in shells[sh]["stos"]]
+            for orb in ORBITALS[sh]:
+                self.orbs.append(orb)
+                self.radial.append((n, stos))
+            r = np.linspace(0.01, 60.0, 6000)
+            f = np.abs(sum(c * N * r ** (n - 1) * np.exp(-z * r) for c, N, z in stos)) * r
+            rc = max(rc, r[np.nonzero(f > tol)[0][-1]] if np.any(f > tol) else 1.0)
+        self.rc = rc
+
+    def values(self, v):
+        r = np.maximum(np.linalg.norm(v, axis=1), 1e-12)
+        out = []
+        for orb, (n, stos) in zip(self.orbs, self.radial):
+            rad = sum(c * N * r ** (n - 1) * np.exp(-z * r) for c, N, z in stos)
+            out.append(rad * _ylm(orb, v, r))
+        return np.array(out)
 
 
-# ------------------------------------------------------------------ main
-def channel_paths(run):
-    run = Path(run)
-    stem, ext = (run.stem, run.suffix) if run.suffix else (run.name, "")
-    def base(tag):
-        return run.with_name(f"{stem}{tag}{ext}")
-    return base
+def _gauss(lo, hi, h, n, cuts=()):
+    """Gauss-Legendre on [lo, hi] in pieces split at the cuts (kinks of the
+    integrand), graded near r = 0 (0.05, 0.1, 0.2, ... A, for the compact
+    components of d and f shells) and of at most h elsewhere."""
+    e = np.concatenate([0.05 * 2.0 ** np.arange(int(np.log2(h / 0.05)) + 1),
+                        np.arange(h, hi + h, h), np.asarray(cuts, float)])
+    e = np.unique(np.concatenate([[lo, hi], e[(e > lo + 1e-10) & (e < hi - 1e-10)]]))
+    x, w = np.polynomial.legendre.leggauss(n)
+    half = 0.5 * (e[1:] - e[:-1])[:, None]
+    return (half * x + 0.5 * (e[1:] + e[:-1])[:, None]).ravel(), (half * w).ravel()
 
 
-def energy_zero(choice, out, Hk, Sk, nocc, label):
-    if choice not in ("auto", "fermi", "midgap"):
-        return float(choice), "value given with --zero"
-    gap = mesh_gap(Hk, Sk, nocc) if choice in ("auto", "midgap") else None
-    if gap and (choice == "midgap" or gap[1] - gap[0] > 1e-3):
-        return 0.5 * (gap[0] + gap[1]), f"midgap of the mesh eigenvalues (VBM {gap[0]:.6f}, CBM {gap[1]:.6f} eV)"
-    if choice == "midgap":
-        raise SystemExit(f"{label}: no gap found on the mesh; use --zero fermi or a value")
-    if out["fermi"] is None:
-        raise SystemExit(f"{label}: no gap and no #Fermi_Energy in the .out "
-                         "(add 'Average Properties' to the input or give --zero <eV>)")
-    return out["fermi"], "Fermi level of the .out"
+def _quadrature(A, B, Ra, Rb, h, n, nphi=12):
+    """Points and weights over the region where both atoms' orbitals are non-zero:
+    spherical about A for A = B, bipolar (r_a, r_b, phi) about the A-B axis
+    otherwise (volume element r_a r_b / d)."""
+    phi = 2 * np.pi * np.arange(nphi) / nphi
+    d = np.linalg.norm(B - A)
+    if d < 1e-8:
+        r, wr = _gauss(0.0, min(Ra, Rb), h, n)
+        ct, wt = np.polynomial.legendre.leggauss(10)
+        st = np.sqrt(1 - ct ** 2)
+        u = np.stack(np.broadcast_arrays(st[:, None] * np.cos(phi), st[:, None] * np.sin(phi),
+                                         ct[:, None] + 0 * phi), -1).reshape(-1, 3)
+        w = (wt[:, None] + 0 * phi).ravel() * 2 * np.pi / nphi
+        return (A + r[:, None, None] * u[None]).reshape(-1, 3), (wr[:, None] * r[:, None] ** 2 * w).ravel()
+    ez = (B - A) / d
+    t = np.array([1.0, 0, 0]) if abs(ez[0]) < 0.9 else np.array([0, 1.0, 0])
+    ex = t - ez * (t @ ez)
+    ex /= np.linalg.norm(ex)
+    circle = np.cos(phi)[:, None] * ex + np.sin(phi)[:, None] * np.cross(ez, ex)
+    P, W = [], []
+    # the r_b range [|r_a - d|, min(r_a + d, Rb)] has kinks at r_a = d and r_a = Rb - d
+    ra, wa = _gauss(0.0, Ra, h, n, (d, Rb - d))
+    for x, wx in zip(ra, wa):
+        lo, hi = abs(x - d), min(x + d, Rb)
+        if hi - lo < 1e-10:
+            continue
+        rb, wb = _gauss(lo, hi, h, n)
+        z = (x * x - rb * rb + d * d) / (2 * d)
+        rho = np.sqrt(np.clip(x * x - z * z, 0, None))
+        P.append((A + z[:, None, None] * ez + rho[:, None, None] * circle).reshape(-1, 3))
+        W.append(np.repeat(wx * x * rb * wb / d * 2 * np.pi / nphi, nphi))
+    return np.concatenate(P), np.concatenate(W)
 
 
-def common_fermi(run):
-    """common Fermi level of a spin-polarized run (bind --common-fermi), from <run>.spin"""
-    p = Path(str(run) + ".spin")
-    if not p.exists():
-        return None
-    v = re.findall(r"^#Fermi_Energy:\s*(\S+)", p.read_text(), re.M)
-    return float(v[-1]) if v else None
+def position_matrix(real, sites, cell, Rs, Sref, h=2.0, n=10):
+    """X[iR, i, j] = <phi_i,0| r |phi_j,R> and the overlap Sq of the same quadrature,
+    for the atom pairs whose block of YAeHMOP's S(R) is non-zero."""
+    first = np.cumsum([0] + [len(a.orbs) for a in sites])
+    no = first[-1]
+    X, Sq = np.zeros((len(Rs), no, no, 3)), np.zeros((len(Rs), no, no))
+    for iR, R in enumerate(Rs):
+        for a, (_, A) in enumerate(real):
+            ia = slice(first[a], first[a + 1])
+            for b, (_, B0) in enumerate(real):
+                ib = slice(first[b], first[b + 1])
+                if not np.any(Sref[iR][ia, ib]):
+                    continue
+                B = B0 + R @ cell
+                if np.linalg.norm(B - A) >= sites[a].rc + sites[b].rc:
+                    continue
+                pts, w = _quadrature(A, B, sites[a].rc, sites[b].rc, h, n)
+                fa = sites[a].values(pts - A) * w
+                fb = sites[b].values(pts - B)
+                Sq[iR, ia, ib] = fa @ fb.T
+                for c in range(3):
+                    X[iR, ia, ib, c] = (fa * pts[:, c]) @ fb.T
+    return X, Sq
 
 
-def write_tb(path, kind, cell, n2, blocks):
+def rmatrix_file(path, real, cell, cells, no, kind, source, channel_shells, origin):
+    """Writes the position matrix file for the R vectors of cells [(R, H, S)].
+    channel_shells: the shells of the run (NP, SOC) or of the up and down
+    channels (SP, or SOC on two tables with different zetas: two sets of
+    orbitals; X and S are then computed per channel, against the S block of
+    that channel).
+    Returns the largest |S(quadrature) - S(YAeHMOP)|."""
+    Rs = [tuple(int(x) for x in R) for R, _, _ in cells]
+    Xs, dS = [], 0.0
+    for c, shells in enumerate(channel_shells):
+        sites = []
+        for ia, (sym, _) in enumerate(real):
+            sh = shells.get(f"{sym.upper()}({ia + 1})", shells.get(sym.upper()))
+            if sh is None:
+                raise SystemExit(f"element {sym} not in {origin}")
+            sites.append(Atom(sh))
+        if sum(len(s.orbs) for s in sites) != no:
+            raise SystemExit(f"the orbitals of {origin} differ from the ones of the run")
+        blk = slice(c * no, (c + 1) * no)
+        Sref = [np.real(S[blk, blk]) for _, _, S in cells]
+        X, Sq = position_matrix(real, sites, cell, Rs, Sref)
+        Xs.append(X)
+        dS = max(dS, max(np.abs(Sq[i] - Sref[i]).max() for i in range(len(Rs))))
+    if kind == "SOC" and len(Xs) == 1:
+        Xs = Xs * 2                     # same orbitals for both spins
+    write_rmatrix(path, Rs, Xs, source)
+    return dS
+
+
+def channel_shells(kind, outs, params):
+    """Slater functions for --rmatrix: from --params (one file; two, up and down,
+    for SP and for SOC on two tables with different zetas) or from the .out of
+    each run; and a description of where from."""
+    two = kind == "SP" or outs[0]["soc_two_zetas"]
+    if params:
+        if len(params) != (2 if two else 1):
+            raise SystemExit("--params takes one parameter file (two, up and down, for SP and for "
+                             "SOC on two tables with different zetas)")
+        return [read_params(p) for p in params], " + ".join(params)
+    if kind == "SOC" and two:
+        raise SystemExit("SOC on two tables with different zetas: the .out does not list the "
+                         "down functions in full; give --params UP DOWN")
+    return [o["shells"] for o in outs], "the .out (4 decimals)"
+
+
+# ------------------------------------------------------------------ output
+def write_tb(path, kind, cell, nb, cells):
     with open(path, "w") as f:
         f.write(f"{kind}\n0.000000\n0.000000\n")
         for v in cell:
             f.write(f"{v[0]:.8f}  {v[1]:.8f}  {v[2]:.8f}\n")
-        f.write(f"{n2}\n{len(blocks)}\n#rcell x   rcell y   rcell z   i   j   ReH   ImH   S\n")
-        for R, H, S in blocks:
+        f.write(f"{nb}\n{len(cells)}\n#rcell x   rcell y   rcell z   i   j   ReH   ImH   S\n")
+        for R, H, S in cells:
             r = R @ cell
-            for i in range(n2):
-                for j in range(n2):
+            for i in range(nb):
+                for j in range(nb):
                     f.write(f"{r[0]:.8f}   {r[1]:.8f}   {r[2]:.8f}   {i + 1}   {j + 1}   "
-                            f"{H[i, j].real:.10f}   {H[i, j].imag:.10f}   {S[i, j].real:.10f}\n")
+                            f"{H[i, j].real:.10f}   {H[i, j].imag:.10f}   {S[i, j]:.10f}\n")
 
 
-def write_basis(path, labels, spins, offset_by_spin):
+def write_basis(path, labels, spins):
     with open(path, "w") as f:
         f.write("#bindex aspecie ax ay az l m spin\n")
         b = 0
         for spin in spins:
-            for ia, sym, orb in labels:
+            for sym, p, orb in labels:
                 b += 1
                 l, m = ORBITAL_LM[orb]
-                p = offset_by_spin[ia]
                 f.write(f"{b}   {sym}   {p[0]:.8f}   {p[1]:.8f}   {p[2]:.8f}   {l}   {m}   {spin}\n")
 
 
-def write_wtb_input(outdir, kind, dim, info, params_name):
-    sysdim = {1: '"1D"', 2: '"2D"', 3: '"3D"'}[dim] if dim in (1, 2, 3) else '"3D"'
-    (outdir / f"input-{kind}.dat").write_text(
-        "NTHREADS= 1\n"
-        f"SYSDIM= {sysdim}\n"
-        "DFT= S\n\n"
-        f'PARAMS_FILE= "{params_name}"\n'
-        'KPATH_FILE= "kpoints.dat"\n'
-        'OUTPUT= "./out/"\n'
-        'CALC_DATA= "./out/"\n\n'
-        "BANDS= T\n")
-    if info["band"]:
-        ppl, pts = info["band"]
-        with open(outdir / "kpoints.dat", "w") as f:
-            f.write(f"{2 * (len(pts) - 1)}\n{ppl + 1}\n")
-            for (l1, k1), (l2, k2) in zip(pts[:-1], pts[1:]):
-                f.write(f"{k1[0]:.8f} {k1[1]:.8f} {k1[2]:.8f} {l1}\n"
-                        f"{k2[0]:.8f} {k2[1]:.8f} {k2[2]:.8f} {l2}\n\n")
+def write_rmatrix(path, Rs, Xs, source):
+    """seedname_r.dat layout (as siesta2wtb.py --rmatrix): integer R, then m n Re(x) Im(x)
+    Re(y) Im(y) Re(z) Im(z), m (home-cell orbital) fastest. Xs: one X per spin block
+    (r is spin diagonal; the up-down blocks are zero)."""
+    nspin, no = len(Xs), Xs[0].shape[1]
+    zero = np.zeros(3)
+    with open(path, "w") as f:
+        f.write(f"yaehmop2wtb.py: <m,0|r|n,R> (Angstrom) of the Slater basis of {source}\n")
+        f.write(f"{nspin * no}\n{len(Rs)}\n")
+        for iR, (r1, r2, r3) in enumerate(Rs):
+            for s in range(nspin):
+                for n_ in range(no):
+                    for s2 in range(nspin):
+                        for m in range(no):
+                            x = Xs[s][iR, m, n_] if s2 == s else zero
+                            f.write("%5d%5d%5d%5d%5d" % (r1, r2, r3, s2 * no + m + 1, s * no + n_ + 1)
+                                    + "".join("%16.10f%16.10f" % (v, 0.0) for v in x) + "\n")
 
 
+# ------------------------------------------------------------------ main
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("run", help="the .bind input file of the YAeHMOP run (outputs next to it)")
-    ap.add_argument("-o", "--outdir", default=".", help="where to write the WanTiBEXOS files")
-    ap.add_argument("--zero", default="auto", help="energy zero: auto, fermi, midgap or a value in eV")
-    ap.add_argument("--name", default="huckel", help="prefix of the TB file (default huckel -> huckel-NP.dat)")
+    ap.add_argument("run", help="the .bind input of the YAeHMOP run (outputs next to it)")
+    ap.add_argument("-o", "--outdir", default=".", help="output folder [.]")
+    ap.add_argument("--name", default="huckel", help="prefix of the TB file [huckel]")
+    ap.add_argument("--efermi", type=float, default=None,
+                    help="energy zero in eV [Fermi level of the .out]")
     ap.add_argument("--cutoff", type=float, default=1e-10,
-                    help="R vectors with all |H|,|S| below this are dropped (default 1e-10)")
-    ap.add_argument("--allow-aliasing", action="store_true",
-                    help="convert even if the mesh is smaller than 2r+1 (H(R) is then approximate)")
+                    help="drop R vectors with all |H|, |S| below this [1e-10]")
+    ap.add_argument("--rmatrix", action="store_true",
+                    help="also write <name>-<TYPE>_r.dat, the position matrix of the basis")
+    ap.add_argument("--params", nargs="+", default=None, metavar="PARMS",
+                    help="--rmatrix: the YAeHMOP parameter file of the run (SP: the up and the down "
+                         "file), for the exponents in full precision [the .out]")
     a = ap.parse_args()
 
-    run = Path(a.run)
-    outdir = Path(a.outdir); outdir.mkdir(parents=True, exist_ok=True)
-    info = read_bind_input(run)
-    if info["kpoints"] is None:
-        raise SystemExit(f"{run}: no 'K points' block (the H/S dumps are written on those k points)")
-    dim, ov = info["dim"], info["overlaps"]
-    kpts = info["kpoints"]
-    N, alias, kdev = check_mesh(kpts, dim, ov)
-    if kdev > 1e-9:
-        print(f"WARNING: the k points of the input are rounded (max deviation from j/N {kdev:.1e}); "
-              "write them with 12 or more decimals for an exact H(R)", file=sys.stderr)
-    if alias and not a.allow_aliasing:
-        need = "x".join(str(2 * ov[d] + 1) if d < dim else "1" for d in range(3))
-        raise SystemExit(f"the mesh {N[0]}x{N[1]}x{N[2]} is too small for the overlap radius {ov}: "
-                         f"use at least {need} (or --allow-aliasing)")
-    real_atoms, cell = structure(info)
+    run, outdir = Path(a.run), Path(a.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    info = read_bind(run)
+    dim, ov, kpts, cell, real = info["dim"], info["overlaps"], info["kpoints"], info["cell"], info["real"]
+    N = mesh_size(kpts, dim, ov)
 
-    base = channel_paths(run)
-    if Path(str(run) + ".HAM").exists():
+    stem, ext = (run.stem, run.suffix) if run.suffix else (run.name, "")
+    if Path(f"{run}.HAM").exists():
         runs = {"": run}
-    elif Path(str(base("_up")) + ".HAM").exists() and Path(str(base("_down")) + ".HAM").exists():
-        runs = {"up": base("_up"), "down": base("_down")}
     else:
-        raise SystemExit(f"no {run}.HAM nor {base('_up')}.HAM/{base('_down')}.HAM: "
-                         "run YAeHMOP with 'Dump Hamil' and 'Dump Overlap'")
+        runs = {t: run.with_name(f"{stem}_{t}{ext}") for t in ("up", "down")}
+        if not all(Path(f"{r}.HAM").exists() for r in runs.values()):
+            raise SystemExit(f"no {run}.HAM (nor _up/_down): run YAeHMOP with 'Dump Hamil' and 'Dump Overlap'")
+    outs = {t: read_out(f"{r}.out") for t, r in runs.items()}
+    out0 = next(iter(outs.values()))
+    kind = "SP" if "up" in runs else "SOC" if out0["soc"] else "NP"
 
-    data = {}
-    for tag, r in runs.items():
-        out = read_out(str(r) + ".out")
-        Hk, Sk = read_dump(str(r) + ".HAM"), read_dump(str(r) + ".OV")
-        if len(Hk) != len(kpts):
-            raise SystemExit(f"{r}.HAM has {len(Hk)} k points, the input has {len(kpts)}")
-        data[tag] = dict(out=out, Hk=Hk, Sk=Sk)
-    out0 = data[next(iter(data))]["out"]
-    labels = orbital_labels(real_atoms, out0["shells"])
-    n = len(labels)
-    # lattice check against the .out (6 decimals)
-    for j, v in enumerate(out0["lattice"][:dim]):
-        if np.abs(v - cell[j]).max() > 2e-4:
-            raise SystemExit(f"lattice vector {j+1} differs from the .out: {cell[j]} vs {v}")
+    labels = []
+    for ia, (sym, p) in enumerate(real):
+        sh = out0["shells"].get(f"{sym.upper()}({ia + 1})", out0["shells"].get(sym.upper()))
+        if sh is None:
+            raise SystemExit(f"element {sym} not found in the parameters of the .out")
+        labels += [(sym, p, orb) for s in "spdf" if s in sh for orb in ORBITALS[s]]
+    no = len(labels)
+    nb = no if kind == "NP" else 2 * no
 
-    if "up" in data:
-        kind = "SP"
-    elif out0["soc_states"]:
-        kind = "SOC"
-    else:
-        kind = "NP"
-    nexp = 2 * n if kind == "SOC" else n
-    for tag, d in data.items():
-        if d["Hk"].shape[1] != nexp:
-            raise SystemExit(f"matrix size {d['Hk'].shape[1]} but the basis has {nexp} functions")
+    ef_common = None
+    if kind == "SP" and a.efermi is None and Path(f"{run}.spin").exists():
+        v = re.findall(r"^#Fermi_Energy:\s*(\S+)", Path(f"{run}.spin").read_text(), re.M)
+        ef_common = float(v[-1]) if v else None
+    print(f"{run}: {kind}, {no} orbitals{' x 2 spins' if kind != 'NP' else ''}, "
+          f"mesh {N[0]}x{N[1]}x{N[2]}, overlap radius {ov}")
+    blocks = {}
+    for t, r in runs.items():
+        Hk, Sk = read_dump(f"{r}.HAM"), read_dump(f"{r}.OV")
+        if len(Hk) != len(kpts) or Hk.shape[1] != (2 * no if kind == "SOC" else no):
+            raise SystemExit(f"{r}.HAM: {len(Hk)} k points of size {Hk.shape[1]}; expected "
+                             f"{len(kpts)} of size {2 * no if kind == 'SOC' else no}")
+        e0 = a.efermi if a.efermi is not None else ef_common if ef_common is not None else outs[t]["fermi"]
+        if e0 is None:
+            raise SystemExit(f"{r}.out has no #Fermi_Energy: add 'Average Properties' or give --efermi")
+        cells, eH, eS = real_space(Hk, Sk, kpts, dim, ov, e0, a.cutoff)
+        if kind != "SOC" and max(np.abs(h.imag).max() for _, h, _ in cells) > 1e-6:
+            raise SystemExit(f"{r}: H(R) is not real")
+        blocks[t] = cells
+        print(f"  {('channel ' + t + ': ') if t else ''}E_F = {e0:.6f} eV (file holds H - E_F S); "
+              f"{len(cells)} R vectors; H(k), S(k) rebuilt to {eH:.1e} eV, {eS:.1e}")
 
-    # electrons -> occupied states (for the midgap)
-    if info["electrons"] is not None:
-        nelec = info["electrons"]
-    else:
-        nelec = sum(out0["shells"][s.upper()]["valence"] for s, _ in real_atoms) - info["charge"]
-
-    report = [f"YAeHMOP run: {run}", f"type: {kind}", f"basis: {n} orbitals"
-              + (f" x 2 spins = {2*n}" if kind != "NP" else ""),
-              f"mesh: {N[0]}x{N[1]}x{N[2]} ({len(kpts)} k points), overlap radius {ov}"
-              + ("  (WARNING: smaller than 2r+1, H(R) approximate)" if alias else "")
-              + (f"  (WARNING: k points rounded by up to {kdev:.1e})" if kdev > 1e-9 else "")]
-    blocks_by_tag = {}
-    # spin polarized with a common Fermi level: one energy zero for both channels,
-    # so that the up and down bands keep their relative position
-    ef_common = common_fermi(run) if kind == "SP" and a.zero in ("auto", "fermi") else None
-    if kind == "SP" and ef_common is None and a.zero in ("auto", "fermi"):
-        print("note: fixed-moment run (no common Fermi level in the .spin file): each spin "
-              "channel gets its own Fermi level as energy zero; with bind --common-fermi "
-              "both channels share one zero", file=sys.stderr)
-    for tag, d in data.items():
-        lab = f"channel {tag}" if tag else kind
-        if kind == "SP":
-            nocc = d["out"]["channel_electrons"]
-        elif kind == "SOC":
-            nocc = nelec
-        else:
-            nocc = nelec / 2
-        if ef_common is not None:
-            e0, why = ef_common, f"common Fermi level of {run}.spin (--common-fermi)"
-        else:
-            e0, why = energy_zero(a.zero, d["out"], d["Hk"], d["Sk"], nocc, lab)
-        cells = real_space(d["Hk"], d["Sk"], kpts, dim, ov)
-        eH, eS = rebuild_error(cells, d["Hk"], d["Sk"], kpts)
-        imH = max(np.abs(h.imag).max() for _, h, _ in cells)
-        imS = max(np.abs(s.imag).max() for _, _, s in cells)
-        if kind != "SOC" and imH > 1e-6:
-            raise SystemExit(f"{lab}: H(R) is not real (max imaginary part {imH:.2e})")
-        if imS > 1e-6:
-            raise SystemExit(f"{lab}: S(R) is not real (max imaginary part {imS:.2e})")
-        kept = [(R, h - e0 * s, s.real) for R, h, s in cells
-                if max(np.abs(h).max(), np.abs(s).max()) > a.cutoff]
-        blocks_by_tag[tag] = kept
-        report += [f"[{lab}] energy zero E0 = {e0:.6f} eV ({why}); file holds H(R) - E0*S(R), Fermi level 0",
-                   f"[{lab}] rebuilt H(k), S(k) on the mesh: max error {eH:.2e} eV, {eS:.2e}; "
-                   f"max |Im H(R)| {imH:.2e}, |Im S(R)| {imS:.2e}; {len(kept)} R vectors kept"]
-
-    pos = {ia: p for ia, (s, p) in enumerate(real_atoms)}
     if kind == "SP":
-        up, dn = blocks_by_tag["up"], blocks_by_tag["down"]
-        keys = sorted({tuple(R) for R, _, _ in up} | {tuple(R) for R, _, _ in dn},
-                      key=lambda R: (sum(abs(x) for x in R), R))
-        du = {tuple(R): (h, s) for R, h, s in up}; dd = {tuple(R): (h, s) for R, h, s in dn}
-        Z = np.zeros((n, n))
-        blocks = []
-        for R in keys:
-            hu, su = du.get(R, (Z, Z)); hd, sd = dd.get(R, (Z, Z))
-            blocks.append((np.array(R), np.block([[hu, Z], [Z, hd]]), np.block([[su, Z], [Z, sd]])))
-        write_tb(outdir / f"{a.name}-SP.dat", "SP", cell, 2 * n, blocks)
-        write_basis(outdir / "basis_set-SP", labels, (1, -1), pos)
-    elif kind == "SOC":
-        write_tb(outdir / f"{a.name}-SOC.dat", "SOC", cell, 2 * n, blocks_by_tag[""])
-        write_basis(outdir / "basis_set-SOC", labels, (1, -1), pos)
+        up, dn = ({tuple(R): (h, s) for R, h, s in blocks[t]} for t in ("up", "down"))
+        Z = np.zeros((no, no))
+        cells = [(np.array(R), np.block([[up.get(R, (Z, Z))[0], Z], [Z, dn.get(R, (Z, Z))[0]]]),
+                  np.block([[up.get(R, (Z, Z))[1], Z], [Z, dn.get(R, (Z, Z))[1]]]))
+                 for R in sorted(set(up) | set(dn), key=lambda R: (sum(map(abs, R)), R))]
     else:
-        write_tb(outdir / f"{a.name}-NP.dat", "NP", cell, n, blocks_by_tag[""])
-        write_basis(outdir / "basis_set-NP", labels, (0,), pos)
-    write_wtb_input(outdir, kind, dim, info, f"{a.name}-{kind}.dat")
-    report += [f"written: {a.name}-{kind}.dat, basis_set-{kind}, input-{kind}.dat"
-               + (", kpoints.dat (band path of the input)" if info["band"] else ""),
-               "run WanTiBEXOS with:  wtb.x < input-" + kind + ".dat"]
-    (outdir / f"yaehmop2wtb-{kind}.log").write_text("\n".join(report) + "\n")
-    print("\n".join(report))
+        cells = blocks[""]
+    tb = outdir / f"{a.name}-{kind}.dat"
+    write_tb(tb, kind, cell, nb, cells)
+    write_basis(outdir / f"basis_set-{kind}", labels, (0,) if kind == "NP" else (1, -1))
+    print(f"written: {tb}, {outdir / f'basis_set-{kind}'}")
+
+    if a.rmatrix:
+        rfile = outdir / f"{a.name}-{kind}_r.dat"
+        shells, origin = channel_shells(kind, list(outs.values()), a.params)
+        dS = rmatrix_file(rfile, real, cell, cells, no, kind, run.name, shells, origin)
+        print(f"written: {rfile} (BSE_CENTER_FILE); exponents from {origin}; "
+              f"max |S(quadrature) - S(YAeHMOP)| = {dS:.1e}")
 
 
 if __name__ == "__main__":

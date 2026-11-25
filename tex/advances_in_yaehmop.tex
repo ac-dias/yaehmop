@@ -3,6 +3,8 @@
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage{lmodern}
+\usepackage{microtype}
+\DisableLigatures[-]{encoding=T1,family=tt*}  % keep -- in option names (\opt{--soc}) as two hyphens
 \usepackage[margin=2.4cm]{geometry}
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs,tabularx,longtable,array}
@@ -185,7 +187,7 @@ viewkel/buttons.c,\newline viewkel/hierarchy.c & modified & old defects: text mo
 docs/SPIN\_SOC.md      & new      & user documentation of the new options \\
 tests/spin\_soc/       & new      & automated tests (\file{run\_tests.py}) and their data \\
 examples/spin\_soc/,\newline new\_tests/ & new & small examples; band structures of MoS$_2$ (SOC) and bcc Fe (spin) with outputs and figures \\
-interface/ & new & \file{yaehmop2wtb.py}: H and S of YAeHMOP $\to$ WanTiBEXOS tight-binding files; MoS$_2$ example validated with \texttt{wtb.x} (Section~\ref{sec:wtb}) \\
+interface/ & new & \file{yaehmop2wtb.py} (lean) and \file{yaehmop2wtb-full.py}: H and S of YAeHMOP $\to$ WanTiBEXOS tight-binding files, basis file and (\opt{--rmatrix}) the position matrix of the Slater basis; MoS$_2$ example validated with \texttt{wtb.x} (Section~\ref{sec:wtb}) \\
 README.md, .gitignore  & modified & short section on the fork; ignore Python caches \\
 \bottomrule
 \end{longtable}
@@ -1516,11 +1518,22 @@ digits of the \texttt{.band} format. The original spinless code shows the same d
 
 The H and S that YAeHMOP exports are meant to be reused by other programs, for example to
 compute excitons and optical properties with WanTiBEXOS
-(\url{https://github.com/ac-dias/wantibexos}). The script \file{interface/yaehmop2wtb.py}
-converts the binary dumps of any of the three kinds of run (spinless, SOC, spin
-polarized) into the non-orthogonal tight-binding format that WanTiBEXOS reads with
-\texttt{DFT= S}, the same layout as its \file{siesta2wtb.py}. It is a stand-alone Python
-script (numpy, scipy) that only reads the outputs, and it needs no change in the C code.
+(\url{https://github.com/ac-dias/wantibexos}). Two scripts in \file{interface/} convert the
+binary dumps of any of the three kinds of run (spinless, SOC, spin polarized) into the
+non-orthogonal tight-binding format that WanTiBEXOS reads with \texttt{DFT= S}, the same
+layout as its \file{siesta2wtb.py}. They only read the outputs and need no change in the C
+code:
+\begin{itemize}
+\item \file{yaehmop2wtb.py} (lean, numpy only): writes the tight-binding file
+  \file{huckel-<TYPE>.dat}, the basis file \file{basis\_set-<TYPE>} and, with
+  \opt{--rmatrix}, the position matrix \file{huckel-<TYPE>\_r.dat}. Its energy zero is the
+  Fermi level of the \texttt{.out}, or \opt{--efermi}.
+\item \file{yaehmop2wtb-full.py} (numpy, scipy): the same files, plus the choice of energy
+  zero below, the input and $k$-path files for \texttt{wtb.x}, and a log. For
+  \opt{--rmatrix} it calls the functions of \file{yaehmop2wtb.py}, so the two scripts stay
+  in the same folder.
+\end{itemize}
+For the same energy zero the two scripts write identical files.
 
 \paragraph{From $H(\mathbf{k})$ to $H(\mathbf{R})$.} WanTiBEXOS needs real-space matrices,
 while YAeHMOP dumps $H(\mathbf{k})$ and $S(\mathbf{k})$ at the points of the \texttt{K points}
@@ -1558,8 +1571,10 @@ same gap ($2.0565$ and $1.9568$ eV) and same SOC splitting at K ($0.1690$ eV).
 \paragraph{Energy zero.} \texttt{wtb.x} diagonalizes $(H(\mathbf{k})-E_F I,\;S(\mathbf{k}))$.
 With $S\neq I$ this is not a rigid shift of the spectrum. The script therefore writes
 $H(\mathbf{R})-E_0 S(\mathbf{R})$ with Fermi level 0, so \texttt{wtb.x} gives exactly the
-YAeHMOP eigenvalues minus $E_0$. By default $E_0$ is the midgap of the mesh eigenvalues
-when there is a gap, and the Fermi level of the \texttt{.out} otherwise. In a
+YAeHMOP eigenvalues minus $E_0$. In \file{yaehmop2wtb-full.py}, by default $E_0$ is the
+midgap of the mesh eigenvalues when there is a gap, and the Fermi level of the \texttt{.out}
+otherwise (\opt{--zero} chooses); \file{yaehmop2wtb.py} uses the Fermi level of the
+\texttt{.out}. In a
 spin-polarized run each channel uses its own Fermi level, so both have $E_F$ at 0.
 
 \paragraph{Validation with MoS$_2$.} \file{interface/example\_MoS2/} reproduces the whole
@@ -1607,6 +1622,99 @@ next to the input, so the new features need almost nothing:
   keeps its own Fermi level as zero, as before (the channels are then aligned at the DFT
   Fermi level they were fitted to), and the script prints a note saying so.
 \end{itemize}
+
+\paragraph{Position matrix (\opt{--rmatrix}).} WanTiBEXOS takes the optical dipoles of a
+non-orthogonal basis in part from $H(\mathbf{R})$, $S(\mathbf{R})$ and the orbital centres, and
+in part from the matrix elements of $\mathbf{r}$ between basis orbitals, read from
+\texttt{BSE\_CENTER\_FILE}. \file{siesta2wtb.py --rmatrix} writes that file for SIESTA. With
+\opt{--rmatrix}, both YAeHMOP scripts write it for the Slater basis of YAeHMOP:
+\begin{equation}
+X_{ij}(\mathbf{R}) = \langle \phi_i,\mathbf{0}|\,\mathbf{r}\,|\phi_j,\mathbf{R}\rangle
+ = \int \phi_i(\mathbf{r}-\mathbf{A})\,\mathbf{r}\,\phi_j(\mathbf{r}-\mathbf{B}-\mathbf{T}_\mathbf{R})\,d^3r ,
+\end{equation}
+in \AA{} and in absolute coordinates (the frame of \file{basis\_set-*}), for the $\mathbf{R}$
+of the tight-binding file. $\mathbf{A}$ is the atom of orbital $i$ in the home cell,
+$\mathbf{B}$ the atom of orbital $j$, and $\mathbf{T}_\mathbf{R}$ the Cartesian lattice vector
+of $\mathbf{R}$. YAeHMOP computes its overlaps analytically but has no position integrals, so
+the script integrates numerically. The steps are these:
+\begin{enumerate}[leftmargin=*]
+\item \emph{Basis functions.} Each orbital is the function YAeHMOP uses for its overlaps,
+  $\phi=R_{nl}(r)\,Y_{lm}(\hat{\mathbf{r}})$, with
+  $R_{nl}(r)=\sum_k c_k N_k\, r^{n-1}e^{-\zeta_k r}$ and
+  $N_k=(2\zeta_k)^{n+1/2}/\sqrt{(2n)!}$; there are one or two Slater functions per shell.
+  The coefficients are those of \texttt{bind}:
+  \begin{itemize}
+  \item $c=1$ for $s$ and single-$\zeta$ $p$;
+  \item $c_1$ as given for single-$\zeta$ $d$ and $f$;
+  \item for double-$\zeta$ shells, $c_1$ and $c_2$ normalized with
+    $S_{12}=[4\zeta_1\zeta_2/(\zeta_1+\zeta_2)^2]^{n+1/2}$, so that
+    $c_1^2+c_2^2+2c_1c_2S_{12}=1$ (as in \file{fileio.c}).
+  \end{itemize}
+  $Y_{lm}$ are the real spherical harmonics in YAeHMOP's order ($s$; $p_x,p_y,p_z$;
+  $d_{x^2-y^2},d_{z^2},d_{xy},d_{xz},d_{yz}$; the seven real $f$). The exponents (bohr$^{-1}$)
+  are converted with the \var{AUI} $=1.889644746$~bohr/\AA{} of \file{R\_overlap\_mat.c}, not
+  with the \var{BOHR} $=0.52918$~\AA{} of \file{bind.h}; the wrong constant leaves an error of
+  $3\times10^{-5}$ in $S$.
+\item \emph{Pairs.} An atom pair is integrated only if its block of YAeHMOP's
+  $S(\mathbf{R})$ is non-zero, which also respects the \texttt{Rho} cutoff. The two atoms
+  must also be closer than $R_c(A)+R_c(B)$, where $R_c$ is the radius beyond which
+  $|R_{nl}(r)|\,r<10^{-7}$ for all shells of the atom ($\approx10$~\AA{} for Mo, $8$~\AA{}
+  for S).
+\item \emph{Quadrature.} Two centres ($d=|\mathbf{B}+\mathbf{T}_\mathbf{R}-\mathbf{A}|>0$) use
+  bipolar coordinates $(r_a,r_b,\varphi)$ about the A--B axis, with
+  $d^3r = (r_a r_b/d)\,dr_a\,dr_b\,d\varphi$:
+  \begin{itemize}
+  \item $r_a\in[0,R_c(A)]$, and $r_b\in[|r_a-d|,\min(r_a+d,R_c(B))]$ for each $r_a$;
+  \item 12 equally spaced points in $\varphi$.
+  \end{itemize}
+  One centre (the same atom with $\mathbf{R}=0$, which gives the on-site dipoles
+  $\langle s|\mathbf{r}|p\rangle$, $\langle p|\mathbf{r}|d\rangle$, \ldots) uses spherical
+  coordinates, with 10 Gauss--Legendre points in $\cos\theta$ and 12 in $\varphi$.
+  \begin{itemize}
+  \item \emph{Angles:} after multiplying by $\mathbf{r}$, the angular dependence is a
+    trigonometric polynomial of degree $\le l_i+l_j+1\le7$. These rules integrate it
+    exactly, so only the radial integration is approximate.
+  \item \emph{Radius:} Gauss--Legendre with 10 points per piece, on pieces of at most
+    2~\AA{}. The pieces are graded near the nuclei (edges at $0.05,0.1,0.2,\ldots$~\AA{}) for
+    compact components such as the $\zeta=6.09$~bohr$^{-1}$ of Fe~$3d$.
+  \item \emph{Kinks:} the $r_a$ pieces are split at $r_a=d$ and $r_a=R_c(B)-d$, where the
+    limits of the $r_b$ range change form. With 1~\AA{} pieces in bcc Fe, these cuts bring
+    the error in $S$ from $5\times10^{-5}$ to $3\times10^{-9}$.
+  \end{itemize}
+\item \emph{Check.} The same points and weights give $S_{ij}(\mathbf{R})$. The script prints
+  the largest difference from the $S(\mathbf{R})$ it wrote to the tight-binding file. This
+  tests the exponents, coefficients, harmonics, unit and quadrature together:
+  \begin{itemize}
+  \item exponents from the \texttt{.out}, printed with 4 decimals: $5\times10^{-5}$;
+  \item exponents from the parameter file of the run (\opt{--params}, 6 decimals):
+    $2.9\times10^{-7}$ for MoS$_2$ (NP and SOC) and $5.7\times10^{-7}$ for bcc Fe (SP, both
+    channels).
+  \end{itemize}
+  In MoS$_2$ the limit is the 6 decimals of the parameter file: a finer quadrature does not
+  change it. In Fe the limit is the default quadrature, and 1~\AA{} pieces give
+  $3\times10^{-9}$ at twice the cost (MoS$_2$: 35~s; Fe with overlap radius 2: 10~s).
+  After charge iteration or zeta variation only the \texttt{.out} has the final exponents.
+\item \emph{Spin.} $\mathbf{r}$ is spin diagonal, so the up--down blocks are zero:
+  \begin{itemize}
+  \item SOC with one table: both diagonal blocks hold the same $X$;
+  \item SP, and SOC on two tables with different zetas ($S=\mathrm{diag}(S_\uparrow,
+    S_\downarrow)$): each channel has its own orbitals, so $X$ is computed and checked per
+    channel (\opt{--params UP DOWN}). For SOC on two tables \opt{--params} is required,
+    because the \texttt{.out} lists the down exponents without the second $d$ zeta and the
+    coefficients.
+  \end{itemize}
+\item \emph{File.} The layout of Wannier90's \file{seedname\_r.dat}, as written by
+  \file{siesta2wtb.py}:
+  \begin{itemize}
+  \item a comment line, the basis size and the number of $\mathbf{R}$;
+  \item one line \texttt{R1 R2 R3 m n Re$X_x$ Im$X_x$ Re$X_y$ Im$X_y$ Re$X_z$ Im$X_z$} per pair,
+    with $m$ running fastest. The imaginary parts are zero, because the orbitals are real.
+  \end{itemize}
+\end{enumerate}
+Because $\mathbf{r}$ is absolute, $X$ is not Hermitian by itself; it satisfies
+$X_{ij}(\mathbf{R}) = X_{ji}(-\mathbf{R}) + \mathbf{T}_\mathbf{R}\,S_{ji}(-\mathbf{R})$. For the
+MoS$_2$ example this relation holds to $4\times10^{-6}$~\AA{}, and the diagonal $X_{ii}(0)$
+gives the atomic positions to $3\times10^{-7}$~\AA{}.
 
 \begin{figure}[H]
 \centering

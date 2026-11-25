@@ -1,5 +1,5 @@
 #!/bin/bash
-# Full example: YAeHMOP (yaehmop-dev) -> yaehmop2wtb.py -> WanTiBEXOS (wtb.x) -> comparison.
+# Full example: YAeHMOP (yaehmop-dev) -> yaehmop2wtb-full.py -> WanTiBEXOS (wtb.x) -> comparison.
 # Run it inside interface/example_MoS2.
 set -e
 source /etc/profile.d/modules.sh 2>/dev/null || true
@@ -22,7 +22,7 @@ done
 
 # 2) conversion to the WanTiBEXOS format and 3) wtb.x band structure
 for case in soc nosoc; do
-  python3 ../yaehmop2wtb.py yaehmop_$case/MoS2.bind -o wtb_$case
+  python3 ../yaehmop2wtb-full.py yaehmop_$case/MoS2.bind -o wtb_$case
   cd wtb_$case
   mkdir -p out
   kind=$(ls input-*.dat | sed 's/input-//; s/.dat//')
