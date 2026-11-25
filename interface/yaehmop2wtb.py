@@ -6,7 +6,7 @@
 Reads only the results of a YAeHMOP run made with 'Dump Hamil', 'Dump Overlap'
 and a full Gamma-centred 'K points' mesh (outputs next to RUN.bind) and writes
 
-  huckel-<TYPE>.dat    H(R) - E_F S(R) and S(R) in the non-orthogonal WanTiBEXOS
+  huckel-<TYPE>.dat    H(R) - E0 S(R) and S(R) in the non-orthogonal WanTiBEXOS
                        layout (as siesta2wtb.py, DFT= S), Fermi level 0
   basis_set-<TYPE>     index species x y z l m spin
   huckel-<TYPE>_r.dat  with --rmatrix: the position matrix <m,0|r|n,R> of the
@@ -15,14 +15,18 @@ and a full Gamma-centred 'K points' mesh (outputs next to RUN.bind) and writes
 
 TYPE is NP (spinless), SOC (bind --soc, 2n x 2n spinors) or SP (RUN_up.bind.*
 and RUN_down.bind.*), detected from the files. yaehmop2wtb-full.py does the
-same plus the energy-zero choices (midgap), the input and k-path files for
-wtb.x and a log.
+same plus more energy-zero choices, the input and k-path files for wtb.x and a
+log.
 
-H(R) = (1/N) sum_k exp(-2 pi i k.R) H(k) for |R_i| <= r_i (the overlap radius
-of the Lattice section), exact when N_i >= 2 r_i + 1 and the k points are
-written with 12 or more decimals. The energy zero E_F is the Fermi level of the
-.out ('Average Properties'), the common one of RUN.bind.spin for a spin
-polarized run with bind --common-fermi, or --efermi.
+H(R) = (1/N) sum_k exp[-2 pi i (k1 R1 + k2 R2 + k3 R3)] H(k), with k_i the
+reduced coordinates of the K points and R_i integers, for |R_i| <= r_i (the
+overlap radius of the Lattice section); exact when N_i >= 2 r_i + 1 and the k
+points are written with 12 or more decimals.
+
+Energy zero E0 (wtb.x needs the Fermi level inside the gap of a semiconductor):
+the midgap of the mesh eigenvalues when there is a gap, otherwise the Fermi
+level of the .out ('Average Properties'); the common Fermi level of
+RUN.bind.spin for a spin polarized run with --common-fermi; or --efermi.
 
 --rmatrix: X_ij(R) = <phi_i,0| r |phi_j,R>, absolute coordinates in the frame
 of basis_set-*, spin diagonal. The orbitals are YAeHMOP's normalized Slater
@@ -60,10 +64,16 @@ def read_bind(path):
     lines = [l.split(";")[0].strip() for l in Path(path).read_text().splitlines()]
     lines = [l for l in lines if l]
     up = [l.upper() for l in lines]
-    info = dict(kpoints=None, crystal=None)
+    info = dict(kpoints=None, crystal=None, electrons=None, charge=0.0)
     i = 0
     while i < len(lines):
         u = up[i]
+        if u.startswith("ELECTRONS") or u.startswith("CHARGE"):
+            p = lines[i].split()
+            v = float(p[1]) if len(p) > 1 else float(lines[i + 1].split()[0])
+            info["electrons" if u.startswith("ELECTRONS") else "charge"] = v
+            i += 1 if len(p) > 1 else 2
+            continue
         if u.startswith("GEOMETRY"):
             info["frac"] = "CRYSTAL" in u
             n = int(lines[i + 1].split()[0])
@@ -121,12 +131,13 @@ def read_bind(path):
 def read_out(path):
     """Shells of each element (or atom, with charge iteration), Fermi level, SOC flag."""
     text = Path(path).read_text()
-    shells, cur = {}, None
+    shells, valence, cur = {}, {}, None
     for l in text.splitlines():
-        m = re.match(r"ATOM:\s+(\S+)\s+Atomic number:", l)
+        m = re.match(r"ATOM:\s+(\S+)\s+Atomic number:.*# Valence Electrons:\s*(\d+)", l)
         if m:
             cur = m.group(1).upper()
             shells.setdefault(cur, {})
+            valence[cur] = int(m.group(2))
             continue
         m = re.match(r"\s+(\d+)([SPDF])(?: DZ)?:\s+(.*)", l)
         if cur and m:
@@ -139,7 +150,11 @@ def read_out(path):
         if cur and not l.startswith("\t"):
             cur = None
     fermi = re.findall(r"#Fermi_Energy:\s*(\S+)", text)
-    return dict(shells=shells, fermi=float(fermi[-1]) if fermi else None,
+    # SP: electrons of this channel (with --common-fermi, from the common Fermi level)
+    chan = (re.findall(r"#ELECTRONS_THIS_CHANNEL_COMMON_FERMI:\s*(\S+)", text)
+            or re.findall(r"#ELECTRONS_THIS_CHANNEL:\s*(\S+)", text))
+    return dict(shells=shells, valence=valence, fermi=float(fermi[-1]) if fermi else None,
+                channel_electrons=float(chan[-1]) if chan else None,
                 soc=bool(re.search(r"#SOC_STATES:", text)),
                 # SOC on two parameter tables with different zetas: S = diag(S_up, S_down)
                 soc_two_zetas=bool(re.search(r"#SOC_SPIN_ZETAS:\s*different", text)))
@@ -224,6 +239,40 @@ def real_space(Hk, Sk, kpts, dim, ov, e0, cutoff):
     if max(np.abs(s.imag).max() for _, _, s in cells) > 1e-6:
         raise SystemExit("S(R) is not real")
     return cells, np.abs(Hr - Hk).max(), np.abs(Sr - Sk).max()
+
+
+def mesh_gap(Hk, Sk, nocc):
+    """(VBM, CBM) of the generalized eigenvalues on the mesh for nocc occupied states,
+    or None (fractional or missing occupation). numpy only: Cholesky S = L L^+."""
+    if nocc is None or abs(nocc - round(nocc)) > 1e-6 or not 1 <= round(nocc) < Hk.shape[1]:
+        return None
+    nocc = int(round(nocc))
+    e = []
+    for H, S in zip(Hk, Sk):
+        try:
+            Li = np.linalg.inv(np.linalg.cholesky(S))
+        except np.linalg.LinAlgError:       # S(k) not positive definite (truncated lattice sums)
+            print("note: S(k) is not positive definite on the mesh; energy zero from the .out",
+                  file=sys.stderr)
+            return None
+        e.append(np.linalg.eigvalsh(Li @ H @ Li.conj().T))
+    e = np.array(e)
+    return e[:, nocc - 1].max(), e[:, nocc].min()
+
+
+def energy_zero(efermi, fermi, Hk, Sk, nocc):
+    """E0 and why: --efermi, else the midgap of the mesh eigenvalues when there is a
+    gap (> 1 meV), else the Fermi level of the .out. In a gapped system YAeHMOP puts
+    the Fermi level at the VBM, where wtb.x would count the occupied bands wrongly."""
+    if efermi is not None:
+        return efermi, "--efermi"
+    gap = mesh_gap(Hk, Sk, nocc)
+    if gap and gap[1] - gap[0] > 1e-3:
+        return 0.5 * (gap[0] + gap[1]), f"midgap of the mesh (VBM {gap[0]:.6f}, CBM {gap[1]:.6f} eV)"
+    if fermi is None:
+        raise SystemExit("no gap on the mesh and no #Fermi_Energy in the .out: add "
+                         "'Average Properties' to the input or give --efermi")
+    return fermi, "Fermi level of the .out"
 
 
 # ------------------------------------------------------------------ position matrix
@@ -444,7 +493,7 @@ def main():
     ap.add_argument("-o", "--outdir", default=".", help="output folder [.]")
     ap.add_argument("--name", default="huckel", help="prefix of the TB file [huckel]")
     ap.add_argument("--efermi", type=float, default=None,
-                    help="energy zero in eV [Fermi level of the .out]")
+                    help="energy zero in eV [midgap of the mesh if gapped, else the Fermi level of the .out]")
     ap.add_argument("--cutoff", type=float, default=1e-10,
                     help="drop R vectors with all |H|, |S| below this [1e-10]")
     ap.add_argument("--rmatrix", action="store_true",
@@ -484,6 +533,11 @@ def main():
     if kind == "SP" and a.efermi is None and Path(f"{run}.spin").exists():
         v = re.findall(r"^#Fermi_Energy:\s*(\S+)", Path(f"{run}.spin").read_text(), re.M)
         ef_common = float(v[-1]) if v else None
+    nelec = info["electrons"]
+    if nelec is None:
+        val = out0["valence"]
+        nelec = sum(val.get(f"{s.upper()}({i + 1})", val.get(s.upper(), 0)) for i, (s, _) in enumerate(real)) \
+            - info["charge"]
     print(f"{run}: {kind}, {no} orbitals{' x 2 spins' if kind != 'NP' else ''}, "
           f"mesh {N[0]}x{N[1]}x{N[2]}, overlap radius {ov}")
     blocks = {}
@@ -492,14 +546,17 @@ def main():
         if len(Hk) != len(kpts) or Hk.shape[1] != (2 * no if kind == "SOC" else no):
             raise SystemExit(f"{r}.HAM: {len(Hk)} k points of size {Hk.shape[1]}; expected "
                              f"{len(kpts)} of size {2 * no if kind == 'SOC' else no}")
-        e0 = a.efermi if a.efermi is not None else ef_common if ef_common is not None else outs[t]["fermi"]
-        if e0 is None:
-            raise SystemExit(f"{r}.out has no #Fermi_Energy: add 'Average Properties' or give --efermi")
+        if ef_common is not None:
+            e0, why = ef_common, f"common Fermi level of {run}.spin"
+        else:
+            nocc = (outs[t]["channel_electrons"] if kind == "SP"
+                    else nelec if kind == "SOC" else nelec / 2)
+            e0, why = energy_zero(a.efermi, outs[t]["fermi"], Hk, Sk, nocc)
         cells, eH, eS = real_space(Hk, Sk, kpts, dim, ov, e0, a.cutoff)
         if kind != "SOC" and max(np.abs(h.imag).max() for _, h, _ in cells) > 1e-6:
             raise SystemExit(f"{r}: H(R) is not real")
         blocks[t] = cells
-        print(f"  {('channel ' + t + ': ') if t else ''}E_F = {e0:.6f} eV (file holds H - E_F S); "
+        print(f"  {('channel ' + t + ': ') if t else ''}E0 = {e0:.6f} eV, {why}; file holds H - E0 S; "
               f"{len(cells)} R vectors; H(k), S(k) rebuilt to {eH:.1e} eV, {eS:.1e}")
 
     if kind == "SP":

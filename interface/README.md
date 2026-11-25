@@ -32,11 +32,12 @@ read with `DFT= S`:
 
 | script | what it writes |
 |--------|----------------|
-| `yaehmop2wtb.py` (lean) | only the results of the run: `huckel-<TYPE>.dat` (H and S), `basis_set-<TYPE>` and, with `--rmatrix`, `huckel-<TYPE>_r.dat` (position matrix). Energy zero: the Fermi level of the `.out`, or `--efermi`. Needs numpy. |
+| `yaehmop2wtb.py` (lean) | only the results of the run: `huckel-<TYPE>.dat` (H and S), `basis_set-<TYPE>` and, with `--rmatrix`, `huckel-<TYPE>_r.dat` (position matrix). Energy zero: the midgap of the mesh if there is a gap, otherwise the Fermi level of the `.out`, or `--efermi`. Needs numpy. |
 | `yaehmop2wtb-full.py` | the same files, plus the choice of energy zero (`--zero auto\|fermi\|midgap\|<eV>`), `input-<TYPE>.dat` and `kpoints.dat` (the band path of `RUN.bind`) ready for `wtb.x < input-<TYPE>.dat`, a log `yaehmop2wtb-<TYPE>.log`, and `--allow-aliasing`. Needs numpy and scipy; `--rmatrix` imports `yaehmop2wtb.py`, so keep both scripts in the same folder. |
 
-For the same energy zero both write identical TB, basis and position-matrix files
+With their default energy zero both write identical TB, basis and position-matrix files
 (checked on the MoS2 example with and without SOC and on spin-polarized bcc Fe).
+A step-by-step tutorial for MoS2 with SOC is in [`yaehmop2wtb_recipe/`](yaehmop2wtb_recipe/).
 Both handle the kinds of run of the fork:
 
 | YAeHMOP run | outputs used | WanTiBEXOS files |
@@ -49,9 +50,20 @@ Both handle the kinds of run of the fork:
 
 The input must contain `Dump Hamil`, `Dump Overlap` and a `K points` block with a
 **full Γ-centred mesh** `N1×N2×N3`. YAeHMOP writes H(k) and S(k) at those points, and the
-script turns them into H(R), S(R) by an inverse Fourier transform:
+script turns them into H(R), S(R) by an inverse Fourier transform.
 
-    H(R) = (1/N) Σ_k exp(−2πi k·R) H(k),    |R_i| ≤ r_i
+The k points of the input are in **reduced coordinates**, i.e. fractions of the reciprocal
+lattice vectors b_i (a_i·b_j = 2π δ_ij): the point (k₁, k₂, k₃) is the wave vector
+K = k₁b₁ + k₂b₂ + k₃b₃ (for example K = (1/3, 1/3, 0)). The cells are labelled by integer
+indices (R₁, R₂, R₃), the cell at T_R = R₁a₁ + R₂a₂ + R₃a₃. On the mesh,
+k_i ∈ {0, 1/N_i, …, (N_i−1)/N_i}, and
+
+    H(R) = (1/N) Σ_{k₁,k₂,k₃} exp[−2πi (k₁R₁ + k₂R₂ + k₃R₃)] H(k),    |R_i| ≤ r_i
+
+The 2π is there because k_i are reduced coordinates and R_i integers:
+K·T_R = 2π (k₁R₁ + k₂R₂ + k₃R₃), so this is the usual exp(−i K·T_R) of Cartesian vectors.
+It is also YAeHMOP's own phase: its Bloch sums in `K_overlap_mat.c` use
+`kdotR = TWOPI*(k₁R₁ + k₂R₂ + k₃R₃)` with the k_i read from the input.
 
 YAeHMOP sums the lattice up to `r` cells in each direction (second line of the `Lattice`
 section, e.g. `5 5 0`). The transform is therefore **exact** when
@@ -95,11 +107,14 @@ also writes them to its log.
 
 **Energy zero.** `wtb.x` diagonalizes (H(k) − E_F·I, S(k)), which is not a rigid shift
 when S ≠ I. The file therefore holds H(R) − E0·S(R) with Fermi level 0, so `wtb.x` gives
-exactly the YAeHMOP eigenvalues minus E0. `yaehmop2wtb.py` uses the Fermi level of the `.out`
-(`Average Properties` needed) or `--efermi`. `yaehmop2wtb-full.py` has these choices:
+exactly the YAeHMOP eigenvalues minus E0. In a semiconductor YAeHMOP puts the Fermi level
+at the VBM, where `wtb.x` would count the occupied bands wrongly (gap ≈ 0), so by default
+both scripts use the midgap. `yaehmop2wtb.py` takes the default or `--efermi`;
+`yaehmop2wtb-full.py` has these choices:
 
 - `auto` (default): the midgap of the mesh eigenvalues if there is a gap, otherwise the
-  Fermi level of the `.out`;
+  Fermi level of the `.out` (`Average Properties` needed). If S(k) is not positive definite
+  on the mesh (truncated lattice sums), the midgap cannot be computed and the Fermi level is used;
 - `fermi`, `midgap`, or a value in eV.
 
 In a spin-polarized run each channel uses its own zero, so that both channels have E_F at

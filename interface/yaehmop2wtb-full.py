@@ -280,7 +280,11 @@ def mesh_gap(Hk, Sk, nocc):
     if nocc is None or abs(nocc - round(nocc)) > 1e-6 or round(nocc) < 1:
         return None
     nocc = int(round(nocc))
-    e = np.array([sl.eigh(h, s, eigvals_only=True) for h, s in zip(Hk, Sk)])
+    try:
+        e = np.array([sl.eigh(h, s, eigvals_only=True) for h, s in zip(Hk, Sk)])
+    except np.linalg.LinAlgError:           # S(k) not positive definite (truncated lattice sums)
+        print("note: S(k) is not positive definite on the mesh; no midgap", file=sys.stderr)
+        return None
     if nocc >= e.shape[1]:
         return None
     vbm, cbm = e[:, nocc - 1].max(), e[:, nocc].min()

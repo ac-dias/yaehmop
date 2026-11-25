@@ -1,0 +1,7 @@
+# outputs of run_recipe.sh (the converter outputs are ignored by out-interface/.gitignore)
+yaehmop/MoS2.bind.*
+yaehmop/yaehmop.log
+wtb/huckel-SOC.dat
+wtb/out/
+wtb/wtb.log
+wtb/bands.png

@@ -1527,22 +1527,36 @@ code:
 \item \file{yaehmop2wtb.py} (lean, numpy only): writes the tight-binding file
   \file{huckel-<TYPE>.dat}, the basis file \file{basis\_set-<TYPE>} and, with
   \opt{--rmatrix}, the position matrix \file{huckel-<TYPE>\_r.dat}. Its energy zero is the
-  Fermi level of the \texttt{.out}, or \opt{--efermi}.
+  default one below, or \opt{--efermi}.
 \item \file{yaehmop2wtb-full.py} (numpy, scipy): the same files, plus the choice of energy
   zero below, the input and $k$-path files for \texttt{wtb.x}, and a log. For
   \opt{--rmatrix} it calls the functions of \file{yaehmop2wtb.py}, so the two scripts stay
   in the same folder.
 \end{itemize}
-For the same energy zero the two scripts write identical files.
+With the default energy zero the two scripts write identical files.
+\file{interface/yaehmop2wtb\_recipe/} is a step-by-step tutorial (MoS$_2$ with SOC).
 
 \paragraph{From $H(\mathbf{k})$ to $H(\mathbf{R})$.} WanTiBEXOS needs real-space matrices,
 while YAeHMOP dumps $H(\mathbf{k})$ and $S(\mathbf{k})$ at the points of the \texttt{K points}
-block. With a full $\Gamma$-centred mesh of $N=N_1N_2N_3$ points the script computes
+block. These points are given in \emph{reduced coordinates}, i.e.\ as fractions of the
+reciprocal lattice vectors $\mathbf{b}_i$ ($\mathbf{a}_i\cdot\mathbf{b}_j=2\pi\delta_{ij}$):
+the point $(k_1,k_2,k_3)$ of the input is the wave vector
+$\mathbf{K}=k_1\mathbf{b}_1+k_2\mathbf{b}_2+k_3\mathbf{b}_3$ (for example K $=(1/3,1/3,0)$).
+The cells are labelled by integer indices $(R_1,R_2,R_3)$, the cell at
+$\mathbf{T}_\mathbf{R}=R_1\mathbf{a}_1+R_2\mathbf{a}_2+R_3\mathbf{a}_3$. With a full
+$\Gamma$-centred mesh of $N=N_1N_2N_3$ points, $k_i\in\{0,1/N_i,\ldots,(N_i-1)/N_i\}$, the
+script computes
 \begin{equation}
-H(\mathbf{R}) = \frac1N\sum_{\mathbf{k}} e^{-2\pi i\,\mathbf{k}\cdot\mathbf{R}}\,H(\mathbf{k}),
+H(\mathbf{R}) = \frac1N\sum_{k_1,k_2,k_3} e^{-2\pi i\,(k_1R_1+k_2R_2+k_3R_3)}\,H(\mathbf{k}),
 \qquad |R_i|\le r_i ,
 \end{equation}
-and the same for $S$. Here $r_i$ is the number of neighbouring cells summed by YAeHMOP
+and the same for $S$. The factor $2\pi$ is there because $k_i$ are reduced coordinates and
+$R_i$ integers: $\mathbf{K}\cdot\mathbf{T}_\mathbf{R} = 2\pi\,(k_1R_1+k_2R_2+k_3R_3)$, so the
+phase is the usual $e^{-i\,\mathbf{K}\cdot\mathbf{T}_\mathbf{R}}$ of Cartesian vectors. It is
+also the phase of YAeHMOP itself, whose Bloch sums in \file{K\_overlap\_mat.c} use
+\var{kdotR} $=$ \var{TWOPI}$\,(k_1R_1+k_2R_2+k_3R_3)$ with the $k_i$ read from the input,
+i.e.\ $H(\mathbf{k})=\sum_\mathbf{R} e^{2\pi i\,(k_1R_1+k_2R_2+k_3R_3)}H(\mathbf{R})$.
+Here $r_i$ is the number of neighbouring cells summed by YAeHMOP
 (second line of the \texttt{Lattice} section). Because the lattice sums of YAeHMOP stop at
 $r_i$ cells, the transform is exact when $N_i\ge 2r_i+1$. The script checks the mesh
 and refuses smaller ones unless asked to proceed. It also warns when the $k$ points in the
@@ -1571,10 +1585,11 @@ same gap ($2.0565$ and $1.9568$ eV) and same SOC splitting at K ($0.1690$ eV).
 \paragraph{Energy zero.} \texttt{wtb.x} diagonalizes $(H(\mathbf{k})-E_F I,\;S(\mathbf{k}))$.
 With $S\neq I$ this is not a rigid shift of the spectrum. The script therefore writes
 $H(\mathbf{R})-E_0 S(\mathbf{R})$ with Fermi level 0, so \texttt{wtb.x} gives exactly the
-YAeHMOP eigenvalues minus $E_0$. In \file{yaehmop2wtb-full.py}, by default $E_0$ is the
-midgap of the mesh eigenvalues when there is a gap, and the Fermi level of the \texttt{.out}
-otherwise (\opt{--zero} chooses); \file{yaehmop2wtb.py} uses the Fermi level of the
-\texttt{.out}. In a
+YAeHMOP eigenvalues minus $E_0$. By default $E_0$ is the midgap of the mesh eigenvalues
+when there is a gap, and the Fermi level of the \texttt{.out} otherwise: in a semiconductor
+YAeHMOP puts the Fermi level at the VBM, where \texttt{wtb.x} would count the occupied bands
+wrongly and report a gap of $\approx0$. \file{yaehmop2wtb.py} accepts \opt{--efermi};
+\file{yaehmop2wtb-full.py} chooses with \opt{--zero}. In a
 spin-polarized run each channel uses its own Fermi level, so both have $E_F$ at 0.
 
 \paragraph{Validation with MoS$_2$.} \file{interface/example\_MoS2/} reproduces the whole
